@@ -3,11 +3,8 @@ build/
 install/
 log/
 
-# 由 scripts/sync_fastlio_mid360_deps.sh 克隆到仓库根目录下的外部依赖（勿提交）
+# 可选：根目录由 sync 脚本克隆的 fast_lio（若与 src 内重复可保留忽略）
 /fast_lio/
-/livox_ros_driver2/
-/Fast-LIO2-Localization/
-/go2_description/
 
 # Python cache and virtual environments
 __pycache__/
@@ -47,4 +44,3 @@ Thumbs.db
 # Local environment files
 .env
 *.local
-src/livox_ros_driver2/

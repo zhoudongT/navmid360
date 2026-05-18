@@ -14,7 +14,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "std_msgs/msg/bool.hpp"
 #include "tf2/utils.h"
-#include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
+#include "tf2_geometry_msgs/tf2_geometry_msgs.h"
 #include "tf2_ros/buffer.h"
 #include "tf2_ros/create_timer_ros.h"
 #include "tf2_ros/transform_listener.h"
@@ -31,6 +31,10 @@ public:
     pose_adjusting_(false),
     goal_reached_(false)
   {
+    declare_parameter<std::string>("robot_type", "go2");
+    const std::string robot_type = toLower(trim(get_parameter("robot_type").as_string()));
+    const bool is_go2 = (robot_type == "go2" || robot_type == "unitree_go2");
+
     declare_parameter<std::string>("path_topic", "/planned_path");
     declare_parameter<std::string>("start_navigation_topic", "/start_navigation");
     declare_parameter<std::string>("stop_navigation_topic", "/stop_navigation");
@@ -38,17 +42,21 @@ public:
     declare_parameter<std::string>("manual_cmd_vel_topic", "/web_cmd_vel");
     declare_parameter<std::string>("tracking_point_marker_topic", "/tracking_point_marker");
     declare_parameter<std::string>("map_frame", "map");
-    declare_parameter<std::string>("base_frame", "base_footprint");
     declare_parameter<std::string>(
-      "base_frame_candidates", "odin1_base_link,base_link,base_footprint");
-    declare_parameter<std::string>("robot_center_offset_frame", "odin1_base_link");
-    declare_parameter<double>("robot_center_offset_x", -0.18);
+      "base_frame", is_go2 ? "base_link" : "base_footprint");
+    declare_parameter<std::string>(
+      "base_frame_candidates",
+      is_go2 ? "base_link,body,base_footprint,odom" : "body,base_link,base_footprint,camera_init");
+    declare_parameter<std::string>(
+      "robot_center_offset_frame", is_go2 ? "base_link" : "body");
+    declare_parameter<double>("robot_center_offset_x", is_go2 ? 0.0 : -0.18);
     declare_parameter<double>("robot_center_offset_y", 0.0);
     declare_parameter<double>("robot_center_offset_z", 0.0);
+    declare_parameter<double>("tf_lookup_timeout_sec", is_go2 ? 0.15 : 0.05);
     declare_parameter<bool>("require_start_command", true);
     declare_parameter<double>("control_frequency", 20.0);
-    declare_parameter<double>("lookahead_distance", 0.20);
-    declare_parameter<double>("tracking_point_reached_xy_tolerance", 0.20);
+    declare_parameter<double>("lookahead_distance", is_go2 ? 0.35 : 0.20);
+    declare_parameter<double>("tracking_point_reached_xy_tolerance", is_go2 ? 0.30 : 0.20);
     declare_parameter<double>("tracking_point_marker_scale", 0.28);
     declare_parameter<bool>("enable_tracking_debug_view", true);
     declare_parameter<int>("tracking_debug_view_size_px", 640);
@@ -62,9 +70,9 @@ public:
     declare_parameter<double>("cross_track_angular_gain", 1.0);
     declare_parameter<double>("final_yaw_gain", 0.5);
     declare_parameter<bool>("enable_lateral_motion", true);
-    declare_parameter<double>("max_linear_speed", 0.60);
-    declare_parameter<double>("max_lateral_speed", 0.60);
-    declare_parameter<double>("max_angular_speed", 1.50);
+    declare_parameter<double>("max_linear_speed", is_go2 ? 0.50 : 0.60);
+    declare_parameter<double>("max_lateral_speed", is_go2 ? 0.35 : 0.60);
+    declare_parameter<double>("max_angular_speed", is_go2 ? 1.00 : 1.50);
     declare_parameter<bool>("align_final_yaw", true);
     declare_parameter<double>("linear_deadband", 0.05);
     declare_parameter<double>("lateral_deadband", 0.05);
@@ -111,12 +119,12 @@ public:
 
     RCLCPP_INFO(
       get_logger(),
-      "d1_controller started. path=%s start_navigation=%s stop_navigation=%s cmd_vel=%s "
-      "manual_cmd_vel=%s tracking_marker=%s map_frame=%s base_frame=%s require_start_command=%s",
-      path_topic.c_str(), start_navigation_topic.c_str(), stop_navigation_topic.c_str(),
-      cmd_vel_topic.c_str(), manual_cmd_vel_topic.c_str(), tracking_point_marker_topic.c_str(),
+      "path controller started (robot_type=%s). path=%s cmd_vel=%s map_frame=%s "
+      "base_frame=%s candidates=%s require_start_command=%s",
+      robot_type.c_str(), path_topic.c_str(), cmd_vel_topic.c_str(),
       get_parameter("map_frame").as_string().c_str(),
       get_parameter("base_frame").as_string().c_str(),
+      get_parameter("base_frame_candidates").as_string().c_str(),
       get_parameter("require_start_command").as_bool() ? "true" : "false");
   }
 
@@ -422,8 +430,10 @@ private:
     std::string last_error;
     for (const auto & base_frame : getBaseFrameCandidates()) {
       try {
+        const double tf_timeout = get_parameter("tf_lookup_timeout_sec").as_double();
         const auto tf = tf_buffer_.lookupTransform(
-          map_frame, base_frame, tf2::TimePointZero, tf2::durationFromSec(0.05));
+          map_frame, base_frame, tf2::TimePointZero,
+          tf2::durationFromSec(tf_timeout));
         if (active_base_frame_ != base_frame) {
           active_base_frame_ = base_frame;
           RCLCPP_INFO(get_logger(), "Using robot base frame for tracking: %s", base_frame.c_str());
@@ -721,7 +731,9 @@ private:
 
     try {
       if (final_pose_map.header.frame_id != map_frame) {
-        final_pose_map = tf_buffer_.transform(final_pose_map, map_frame, tf2::durationFromSec(0.05));
+        final_pose_map = tf_buffer_.transform(
+          final_pose_map, map_frame,
+          tf2::durationFromSec(get_parameter("tf_lookup_timeout_sec").as_double()));
       }
     } catch (const tf2::TransformException & ex) {
       RCLCPP_WARN_THROTTLE(
@@ -761,7 +773,9 @@ private:
     stamped.header.stamp = rclcpp::Time(0);
 
     try {
-      pose_out = tf_buffer_.transform(stamped, base_frame, tf2::durationFromSec(0.05));
+      pose_out = tf_buffer_.transform(
+        stamped, base_frame,
+        tf2::durationFromSec(get_parameter("tf_lookup_timeout_sec").as_double()));
       applyRobotCenterOffsetToRelativePose(base_frame, pose_out);
       return true;
     } catch (const tf2::TransformException & ex) {
@@ -858,6 +872,14 @@ private:
       --last;
     }
     return text.substr(first, last - first);
+  }
+
+  static std::string toLower(std::string text)
+  {
+    for (char & ch : text) {
+      ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    }
+    return text;
   }
 
   static double clamp(double value, double min_value, double max_value)

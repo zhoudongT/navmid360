@@ -1,0 +1,7 @@
+string package_path
+bool overwrite
+bool fast_save
+---
+bool success
+string message
+string manifest_path

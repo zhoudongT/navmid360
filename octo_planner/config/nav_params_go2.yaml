@@ -1,0 +1,40 @@
+# Go2 + Mid-360 顶装 + FAST-LIO2 重定位导航（map/odom/base_link 由定位 launch 发布）
+# 请按本机路径修改 map_package_dir / relocalization_* 文件
+
+relocalization_bin_file: /home/allen/maps/relocalization.bin
+relocalization_pcd_file: /home/allen/maps/scans_0.5m.pcd
+map_package_dir: /home/allen/maps/window_filtered_all
+show_rviz: false
+show_map_gui: false
+# FAST-LIO 已发布 odom->base_link 时必须为 false
+use_static_odom_to_base: false
+
+d1_controller:
+  ros__parameters:
+    robot_type: go2
+    robot_center_offset_frame: base_link
+    robot_center_offset_x: 0.0
+    robot_center_offset_y: 0.0
+    robot_center_offset_z: 0.0
+    tracking_point_reached_xy_tolerance: 0.35
+    tracking_point_marker_scale: 0.28
+    enable_tracking_debug_view: true
+    tracking_debug_view_size_px: 640
+    tracking_debug_view_pixels_per_meter: 80.0
+    tracking_debug_view_frequency: 10.0
+    linear_gain: 0.9
+    lateral_gain: 0.7
+    heading_gain: 1.0
+    cross_track_angular_gain: 0.6
+    final_yaw_gain: 0.4
+    enable_lateral_motion: true
+    max_linear_speed: 0.45
+    max_lateral_speed: 0.30
+    max_angular_speed: 0.85
+    align_final_yaw: true
+    linear_deadband: 0.04
+    lateral_deadband: 0.04
+    angular_deadband: 0.04
+    goal_position_tolerance: 0.12
+    goal_yaw_tolerance: 0.15
+    tf_lookup_timeout_sec: 0.15

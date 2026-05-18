@@ -1,0 +1,80 @@
+<?xml version="1.0"?>
+<!-- 内置简易 Go2 外形（无 go2_description 包时使用），仅用于 map_viewer / RViz 显示 -->
+<robot name="go2_simple">
+  <material name="body_gray">
+    <color rgba="0.55 0.58 0.62 1.0"/>
+  </material>
+  <material name="leg_dark">
+    <color rgba="0.25 0.25 0.28 1.0"/>
+  </material>
+
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 0.12" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.42 0.22 0.10"/>
+      </geometry>
+      <material name="body_gray"/>
+    </visual>
+  </link>
+
+  <link name="fl_hip">
+    <visual>
+      <origin xyz="0 0 -0.08" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.05 0.05 0.16"/>
+      </geometry>
+      <material name="leg_dark"/>
+    </visual>
+  </link>
+  <joint name="fl_hip_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="fl_hip"/>
+    <origin xyz="0.18 0.12 0.06" rpy="0 0 0"/>
+  </joint>
+
+  <link name="fr_hip">
+    <visual>
+      <origin xyz="0 0 -0.08" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.05 0.05 0.16"/>
+      </geometry>
+      <material name="leg_dark"/>
+    </visual>
+  </link>
+  <joint name="fr_hip_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="fr_hip"/>
+    <origin xyz="0.18 -0.12 0.06" rpy="0 0 0"/>
+  </joint>
+
+  <link name="rl_hip">
+    <visual>
+      <origin xyz="0 0 -0.08" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.05 0.05 0.16"/>
+      </geometry>
+      <material name="leg_dark"/>
+    </visual>
+  </link>
+  <joint name="rl_hip_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="rl_hip"/>
+    <origin xyz="-0.18 0.12 0.06" rpy="0 0 0"/>
+  </joint>
+
+  <link name="rr_hip">
+    <visual>
+      <origin xyz="0 0 -0.08" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.05 0.05 0.16"/>
+      </geometry>
+      <material name="leg_dark"/>
+    </visual>
+  </link>
+  <joint name="rr_hip_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="rr_hip"/>
+    <origin xyz="-0.18 -0.12 0.06" rpy="0 0 0"/>
+  </joint>
+</robot>

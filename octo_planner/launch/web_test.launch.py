@@ -70,7 +70,7 @@ def generate_launch_description():
     launch_planner_arg = DeclareLaunchArgument(
         "launch_planner",
         default_value="true",
-        description="Launch jie_path_node for interactive path planning",
+        description="Launch dong_path_node for interactive path planning",
     )
     launch_controller_arg = DeclareLaunchArgument(
         "launch_controller",
@@ -93,19 +93,19 @@ def generate_launch_description():
         description="HTTP port for the web viewer",
     )
 
-    jie_octomap_share = get_package_share_directory("jie_octomap")
+    dong_octomap_share = get_package_share_directory("dong_octomap")
 
-    odin1_loc_rviz_config_file = os.path.join(
-        jie_octomap_share, "rviz", "odin1_loc.rviz"
+    mid360_loc_rviz_config_file = os.path.join(
+        dong_octomap_share, "rviz", "mid360_loc.rviz"
     )
-    web_root = os.path.join(jie_octomap_share, "web")
+    web_root = os.path.join(dong_octomap_share, "web")
     web_server_script = os.path.abspath(
         os.path.join(
-            jie_octomap_share,
+            dong_octomap_share,
             "..",
             "..",
             "lib",
-            "jie_octomap",
+            "dong_octomap",
             "no_cache_http_server.py",
         )
     )
@@ -154,7 +154,7 @@ def generate_launch_description():
     )
 
     pcd_publisher_node = Node(
-        package="jie_octomap",
+        package="dong_octomap",
         executable="pcd_file_publisher.py",
         name="pcd_file_publisher",
         output="screen",
@@ -174,14 +174,14 @@ def generate_launch_description():
         executable="rviz2",
         name="rviz2",
         output="screen",
-        arguments=["-d", odin1_loc_rviz_config_file],
+        arguments=["-d", mid360_loc_rviz_config_file],
         condition=IfCondition(LaunchConfiguration("launch_rviz")),
     )
 
     planner_node = Node(
         package="octo_planner",
-        executable="jie_path_node",
-        name="jie_path_node",
+        executable="dong_path_node",
+        name="dong_path_node",
         output="screen",
         condition=IfCondition(LaunchConfiguration("launch_planner")),
         parameters=[
@@ -200,11 +200,12 @@ def generate_launch_description():
                 "source_world_file": "",
                 "robot_radius": 0.25,
                 "max_iterations": 500000,
-                "snap_search_radius_cells": 12,
+                "snap_search_radius_cells": 13,
                 "require_ground_support": True,
                 "strict_direct_ground_support": False,
                 "ground_support_xy_radius_cells": 1,
-                "ground_support_depth_cells": 1,
+                "ground_support_depth_cells": 2,
+                "max_vertical_neighbor_step_cells": 1,
                 "enable_preblocked_costmap": True,
                 "preblocked_costmap_radius_cells": 3,
                 "preblocked_costmap_weight": 2.5,
@@ -235,7 +236,7 @@ def generate_launch_description():
     )
 
     map_package_manager_node = Node(
-        package="jie_octomap",
+        package="dong_octomap",
         executable="map_package_manager",
         name="map_package_manager",
         output="screen",
@@ -247,7 +248,7 @@ def generate_launch_description():
     )
 
     occupied_marker_node = Node(
-        package="jie_octomap",
+        package="dong_octomap",
         executable="octomap_to_occupied_markers_node",
         name="octomap_to_occupied_markers",
         output="screen",
@@ -261,7 +262,7 @@ def generate_launch_description():
     )
 
     map_viewer_gui_node = Node(
-        package="jie_octomap",
+        package="dong_octomap",
         executable="map_viewer_gui",
         name="map_viewer_gui",
         output="screen",
@@ -276,7 +277,7 @@ def generate_launch_description():
     )
 
     map_save_gui_node = Node(
-        package="jie_octomap",
+        package="dong_octomap",
         executable="map_save_gui",
         name="map_save_gui",
         output="screen",

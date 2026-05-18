@@ -12,12 +12,11 @@
   <depend>geometry_msgs</depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
-  <exec_depend>jie_octomap</exec_depend>
-  <exec_depend>odin_ros_driver</exec_depend>
+  <exec_depend>dong_octomap</exec_depend>
   <depend>nav_msgs</depend>
   <exec_depend>nav2_lifecycle_manager</exec_depend>
   <exec_depend>nav2_map_server</exec_depend>
-  <depend>jie_map_msgs</depend>
+  <depend>dong_map_msgs</depend>
   <depend>octomap</depend>
   <depend>octomap_msgs</depend>
   <depend>opencv</depend>

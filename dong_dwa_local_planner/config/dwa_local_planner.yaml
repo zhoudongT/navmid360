@@ -1,0 +1,28 @@
+dwa_local_planner:
+  ros__parameters:
+    enabled: false
+    map_frame_id: "map"
+    base_frame_id: "base_footprint"
+    path_topic: "/planned_path"
+    obstacle_cloud_topic: ""
+    cmd_vel_out_topic: "/cmd_vel_dwa"
+    local_path_topic: "/local_path_dwa"
+    global_path_step: 10
+    obstacle_cell_snap: 0.3
+    reached_position_tolerance: 0.25
+    reached_yaw_tolerance: 0.2
+    goal_min_angular_speed: -0.5
+    goal_max_angular_speed: 0.5
+    goal_angular_gain: 2.0
+    predict_time: 2.0
+    dwa_lookahead_step: 0.1
+    goal_weight: 1.0
+    speed_weight: 0.5
+    obstacle_weight: 1.9
+    safe_distance: 0.3
+    omega_min: -1.0
+    omega_max: 1.0
+    v_min: 0.0
+    v_max: 0.6
+    thread_workers: 8
+    control_period: 0.1

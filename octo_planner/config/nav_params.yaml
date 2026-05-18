@@ -1,41 +1,47 @@
-relocalization_bin_file: /home/firefly/ros2_ws/src/odin_ros_driver/map/B5/map_20260424_110803.bin
-relocalization_pcd_file: /home/firefly/ros2_ws/src/odin_ros_driver/map/B5/Relocation_Map.pcd
+# Relocalization / prior map (.bin), optional legacy path | 重定位或历史地图 .bin（可选）
+relocalization_bin_file: /home/firefly/ros2_ws/maps/mid360/B5/map_20260424_110803.bin
+# PCD for RViz display (optional) | 供 RViz 显示的点云 PCD（可选）
+relocalization_pcd_file: /home/firefly/ros2_ws/maps/mid360/B5/Relocation_Map.pcd
+# Saved OctoMap package directory | 已保存的 OctoMap 地图包目录
 map_package_dir: /home/firefly/maps/B5
+# Launch RViz2 | 是否启动 RViz2
 show_rviz: false
+# Launch Qt map save/load GUI | 是否启动 Qt 地图保存/加载窗口
 show_map_gui: false
-publish_d1_odom: false
+# Use static TF odom→base if no live odom | 无实时里程时使用静态 odom→base TF
 use_static_odom_to_base: true
 
 d1_controller:
   ros__parameters:
-    # Path tracking geometry.
-    robot_center_offset_frame: odin1_base_link
+    # Path tracking: robot center frame and offset (m) | 路径跟踪：机器人几何中心坐标系与偏移（米）
+    robot_center_offset_frame: body
     robot_center_offset_x: -0.18
     robot_center_offset_y: 0.0
     robot_center_offset_z: 0.0
+    # XY tolerance to mark waypoint reached; arrow marker scale | 判定到达路径点的 XY 容差；箭头标记尺度
     tracking_point_reached_xy_tolerance: 0.40
     tracking_point_marker_scale: 0.28
 
-    # OpenCV top-down debug view.
+    # OpenCV top-down debug window | OpenCV 俯视调试窗口
     enable_tracking_debug_view: true
     tracking_debug_view_size_px: 640
     tracking_debug_view_pixels_per_meter: 80.0
     tracking_debug_view_frequency: 10.0
 
-    # Speed tracking gains.
+    # Speed loop gains | 速度环增益
     linear_gain: 1.0
     lateral_gain: 0.8
     heading_gain: 0.8
     cross_track_angular_gain: 0.5
     final_yaw_gain: 0.3
 
-    # Motion mode and limits.
+    # Motion mode and velocity limits (m/s, rad/s) | 运动模式与速度上限（米/秒、弧度/秒）
     enable_lateral_motion: true
     max_linear_speed: 0.7
     max_lateral_speed: 0.5
     max_angular_speed: 0.9
 
-    # Deadbands and goal tolerances.
+    # Deadbands and goal tolerances | 死区与目标容差
     align_final_yaw: true
     linear_deadband: 0.05
     lateral_deadband: 0.05

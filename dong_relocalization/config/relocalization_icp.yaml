@@ -1,0 +1,13 @@
+icp_relocalizer:
+  ros__parameters:
+    prior_pcd_path: ""   # 必填：与 FAST-LIO 保存的地图同一坐标系（通常为 map）下的 PCD
+    scan_topic: "/cloud_registered"
+    map_frame: "map"
+    lidar_frame: "camera_init"
+    voxel_size: 0.25
+    crop_margin_m: 8.0
+    max_correspondence_distance: 0.8
+    icp_max_iterations: 40
+    min_fitness: 0.08
+    max_rmse: 0.35
+    publish_tf: false    # true 时会广播 map->lidar TF，可能与 FAST-LIO 冲突，默认关闭

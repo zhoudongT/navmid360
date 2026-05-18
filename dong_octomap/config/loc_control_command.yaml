@@ -1,0 +1,103 @@
+register_keys:
+  # If off, allow connection when USB is below 3.0 | 关闭时即使 USB 低于 3.0 也允许连接
+  # ATTENTION: USB 3.0 recommended; SLAM needs USB 3.0 for reliable map transfer | 注意：建议 USB 3.0；SLAM 与地图传输依赖 USB 3.0 才稳定
+  strict_usb3.0_check: 0  # 0: off; 1: on | 0：关；1：开
+
+  # 0: LiDAR/IMU device clock as stamp (recommended) | 0：雷达/IMU 设备时钟为时间戳（推荐）
+  # 1: host ROS receive time as stamp | 1：主机 ROS 接收时间作时间戳
+  # 2: align device time to host axis | 2：设备时间对齐到主机时间轴
+  use_host_ros_time: 0  # 0: device timestamp, no PTP offset fix | 0：使用设备时间戳，不做 PTP 偏移校正
+
+  streamctrl: 1           # 0: off; 1: on | 0：关；1：开
+
+  # Original RGB as JPEG from device | 设备原始 RGB（JPEG）
+  sendrgbcompressed: 1    # 0: off; 1: on | 0：关；1：开
+
+  # RGB decoded to bgr8 on host | 主机解码为 bgr8 的 RGB
+  # Processed on host | 在主机上处理
+  sendrgb: 0              # 0: off; 1: on | 0：关；1：开
+
+  # Undistort RGB from decoded RGB; needs sendrgb | 对解码 RGB 去畸变；依赖 sendrgb；标定放在工作区 mid360 配置目录
+  # depends on sendrgb; calib path per your mid360 / camera pipeline | 依赖 sendrgb；标定路径按 Mid-360 或相机链路自行放置
+  # Processed on host | 在主机上处理
+  sendrgbundistort: 0    # 0: off; 1: on | 0：关；1：开
+
+  # IMU data | IMU 数据
+  sendimu: 0              # 0: off; 1: on | 0：关；1：开
+
+  # SDK IMU smooth send: fixed interval, high-priority thread | SDK IMU 平滑发送：固定间隔、高优先级线程减抖动
+  # When on, IMU at precise intervals (default 400 Hz) | 开启后以精确间隔（默认 400 Hz）发送 IMU
+  enable_imu_smooth: 0    # 0: disable smooth send; 1: enable | 0：关闭平滑；1：开启（默认行为见设备文档）
+
+  # IMU smooth frequency Hz (only if enable_imu_smooth=1) | IMU 平滑频率（仅 enable_imu_smooth=1 时生效）
+  imu_smooth_frequency: 400  # 1–1000 Hz, recommended 400 | 1–1000 Hz，建议 400
+
+  # Odometry | 里程计
+  sendodom: 1             # 0: off; 1: on | 0：关；1：开
+
+  # TF odom→base_link; keep on unless you must off | 发布 odom→base_link TF；除非必须否则保持开启
+  # ATTENTION: needed for RViz cloud_raw | 注意：RViz 显示 cloud_raw 依赖此项
+  send_odom_baselink_tf: 1 # 0: off; 1: on | 0：关；1：开
+
+  # Raw dToF | 原始 dToF
+  senddtof: 0             # 0: off; 1: on | 0：关；1：开
+  cloud_raw_confidence_threshold: 35 # see driver readme | 详见驱动 README
+
+  # dToF rate: 100→10 fps, 145→14.5 fps (value ×0.1) | dToF 帧率：100→10 fps，145→14.5 fps（数值×0.1）
+  # Higher fps: smoother cloud, more bandwidth | 更高帧率：点云更平滑、带宽更大
+  dtof_fps: 100           # 100: 10fps; 145: 14.5fps | 100：10fps；145：14.5fps
+
+  # SLAM cloud | SLAM 点云
+  sendcloudslam: 1        # 0: off; 1: on | 0：关；1：开
+
+  # Render cloud from raw + RGB + calib on host | 主机上用原始点云+RGB+calib 生成渲染点云
+  # Processed on host | 在主机上处理
+  sendcloudrender: 1      # 0: off; 1: on | 0：关；1：开
+
+  # Depth completion demo; heavy CPU | 深度补全演示；计算量大
+  # See readme | 详见 readme
+  # Processed on host | 在主机上处理
+  senddepth: 0            # 0: off; 1: on | 0：关；1：开
+
+  # Reproject cloud_slam to image with odom | 用里程计将 cloud_slam 重投影到图像
+  # Processed on host | 在主机上处理
+  sendreprojection: 0    # 0: off; 1: on | 0：关；1：开
+
+  # Overlay reprojected points on camera image | 将重投影点叠加到相机图
+  # Processed on host | 在主机上处理
+  sendoverlay: 0                                    # 0: off; 1: on | 0：关；1：开
+  overlay_reprojected_topic: "/mid360/reprojected_image"  # optional debug image | 可选调试图像
+  overlay_camera_topic: "/mid360/image/undistorted"       # optional camera (if fused) | 若有相机融合
+  overlay_output_topic: "/mid360/overlay_image"           # overlay output | 叠加输出
+  overlay_alpha: 0.6                                     # blend 0–1, higher = more reproj | 混合 0–1，越大重投影色越多
+
+  # Record RGB/odom/SLAM cloud as OLX for MindCloud(TM) | 以 OLX 录制 RGB/里程计/SLAM 点云供 MindCloud 后处理
+  # Path: {ws}/maps/mid360/recorddata/{time}/ | 路径：工作区 maps/mid360/recorddata/{时间}/
+  # ATTENTION: copy full folder for post-processing | 注意：后处理请复制整个文件夹
+  recorddata: 0           # 0: off; 1: on | 0：关；1：开
+
+  # Device status log → .../log/Driver_{time}/Conn_{time}/dev_status.csv | 设备状态日志保存路径（Driver/Conn 为时间戳目录）
+  devstatuslog: 1         # 0: off; 1: on | 0：关；1：开
+
+  save_log: 0 # 0: off; 1: on | 0：关；1：开
+
+  # Raw dToF intensity gray (debug) | 原始 dToF 强度灰度（调试）
+  pubintensitygray: 0     # 0: off; 1: on | 0：关；1：开
+
+  showpath: 0             # 0: off; 1: on | 0：关；1：开
+  showcamerapose: 0       # 0: off; 1: on | 0：关；1：开
+
+  custom_map_mode: 2      # 0: Odometry 1: SLAM 2: Relocalization | 0：里程计 1：SLAM 2：重定位
+  custom_init_pos: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+  relocalization_map_abs_path: "/home/allen/ros2_ws/maps/mid360/map_20260423_125219.bin"  # required in mode 2 | 模式 2 必须填写
+
+  # Mapping result: use set_param.sh e.g. "./set_param.sh save_map 1" | 建图结果：用 set_param.sh，例如 "./set_param.sh save_map 1"
+  mapping_result_dest_dir: "" # "": default {ws}/maps/mid360/{driver_start_time}/ | 空：默认保存到工作区 maps/mid360/{驱动启动时间}/
+  mapping_result_file_name: "" # "": default map_{save_time}.bin in dir above | 空：上述目录下默认文件名 map_{保存时间}.bin
+
+  # Image mask: send to device on startup | 图像掩码：启动时下发到设备
+  sendimagemask: 0        # 0: off; 1: on | 0：关；1：开
+  image_mask_abs_path: "" # PNG path, e.g. 1600×1296 | 掩码 PNG 绝对路径（如 1600×1296）
+
+  # resetalgo: send algo_reset on startup | resetalgo：启动时对设备发送算法复位
+  resetalgo: 0            # 0: off; 1: on | 0：关；1：开

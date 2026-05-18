@@ -10,7 +10,7 @@ find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
-find_package(jie_map_msgs REQUIRED)
+find_package(dong_map_msgs REQUIRED)
 find_package(octomap_msgs REQUIRED)
 find_package(octomap REQUIRED)
 find_package(OpenCV REQUIRED)
@@ -20,17 +20,17 @@ find_package(tf2_geometry_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(visualization_msgs REQUIRED)
 
-add_executable(jie_path_node src/jie_path_node.cpp)
-ament_target_dependencies(jie_path_node
+add_executable(dong_path_node src/dong_path_node.cpp)
+ament_target_dependencies(dong_path_node
   rclcpp
   sensor_msgs
   geometry_msgs
   nav_msgs
-  jie_map_msgs
+  dong_map_msgs
   octomap_msgs
   visualization_msgs
 )
-target_link_libraries(jie_path_node octomap)
+target_link_libraries(dong_path_node octomap)
 
 add_executable(d1_controller src/d1_controller.cpp)
 target_include_directories(d1_controller PRIVATE ${OpenCV_INCLUDE_DIRS})
@@ -56,7 +56,7 @@ ament_target_dependencies(test_map_to_odom_tf_node
 )
 
 install(TARGETS
-  jie_path_node
+  dong_path_node
   d1_controller
   test_map_to_odom_tf_node
   DESTINATION lib/${PROJECT_NAME}

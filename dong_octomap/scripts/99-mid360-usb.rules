@@ -1,0 +1,2 @@
+# Livox Mid-360 / related USB device (example vendor/product; adjust per lsusb if needed)
+SUBSYSTEM=="usb", ATTR{idVendor}=="2207", ATTR{idProduct}=="0019", MODE="0666", GROUP="plugdev"

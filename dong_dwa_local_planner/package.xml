@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>dong_dwa_local_planner</name>
+  <version>0.1.0</version>
+  <description>
+    2.5D DWA 局部规划与速度采样模块。核心算法从 MoveBase3D 的 local_planner_3d 提取并整理为纯 Python 库 + ROS2 桥接节点
+   （原项目：https://github.com/WilsonGuo/MoveBase3D ，ROS2 脚本路径 local_planner_3d/local_planner_3d/nodes/local_planner_node.py）。
+  </description>
+  <maintainer email="zhangwanjie@126.com">robot</maintainer>
+  <license>BSD-3-Clause</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>sensor_msgs_py</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>visualization_msgs</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

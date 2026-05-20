@@ -217,6 +217,10 @@ else(ROS_EDITION STREQUAL "ROS2")
   #---------------------------------------------------------------------------------------
   add_definitions(-DBUILDING_ROS2)
 
+  if(NOT DISTRO_ROS AND DEFINED ENV{ROS_DISTRO})
+    set(DISTRO_ROS $ENV{ROS_DISTRO})
+  endif()
+
   # find dependencies
   # uncomment the following section in order to fill in
   # further dependencies manually.
@@ -286,6 +290,9 @@ else(ROS_EDITION STREQUAL "ROS2")
     rosidl_get_typesupport_target(cpp_typesupport_target
     ${LIVOX_INTERFACES} "rosidl_typesupport_cpp")
     target_link_libraries(${PROJECT_NAME} "${cpp_typesupport_target}")
+    set(LIVOX_INTERFACE_TARGET "${cpp_typesupport_target}")
+    set(LIVOX_INTERFACES_INCLUDE_DIRECTORIES
+      "${CMAKE_CURRENT_BINARY_DIR}/rosidl_generator_cpp")
   else()
     set(LIVOX_INTERFACE_TARGET "${LIVOX_INTERFACES}__rosidl_typesupport_cpp")
     add_dependencies(${PROJECT_NAME} ${LIVOX_INTERFACES})

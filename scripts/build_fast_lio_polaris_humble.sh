@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# 在「仅 Foxy」环境下编译 Fast-LIO2-Localization/FAST_LIO（包名 fast_lio）。
+# 在「仅 Humble」环境下编译 Fast-LIO2-Localization/FAST_LIO（包名 fast_lio）。
 # 若 shell 同时 source 了 Noetic，会误链 ROS1 的 pcl_conversions 导致编译失败。
 #
 # 用法:
-#   cd /path/to/dong_3d_nav
-#   bash scripts/build_fast_lio_polaris_foxy.sh
+#   cd /path/to/navmid360
+#   bash scripts/build_fast_lio_polaris_humble.sh
 #
 set -euo pipefail
 
@@ -16,19 +16,19 @@ if [[ ! -f "${FAST_LIO_DIR}/package.xml" ]]; then
   exit 1
 fi
 
-bash "${REPO_ROOT}/scripts/patch_fast_lio_polaris_foxy.sh" "${FAST_LIO_DIR}" 2>/dev/null || true
+bash "${REPO_ROOT}/scripts/patch_fast_lio_polaris_humble.sh" "${FAST_LIO_DIR}" 2>/dev/null || true
 python3 "${REPO_ROOT}/scripts/patch_fast_lio_ros2_cmake.py" "${FAST_LIO_DIR}" 2>/dev/null || true
 
 exec env -i \
   HOME="${HOME}" \
   USER="${USER:-$(id -un)}" \
   LANG="${LANG:-en_US.UTF-8}" \
-  PATH="/usr/bin:/bin:/usr/local/bin:/opt/ros/foxy/bin" \
+  PATH="/usr/bin:/bin:/usr/local/bin:/opt/ros/humble/bin" \
   bash -lc "
     set -e
-    source /opt/ros/foxy/setup.bash
+    source /opt/ros/humble/setup.bash
     LIVOX_INSTALL=\"${REPO_ROOT}/install/livox_ros_driver2\"
-    CMAKE_EXTRA=\"/opt/ros/foxy\"
+    CMAKE_EXTRA=\"/opt/ros/humble\"
     if [[ -f \"\${LIVOX_INSTALL}/share/livox_ros_driver2/package.xml\" ]]; then
       CMAKE_EXTRA=\"\${CMAKE_EXTRA}:\${LIVOX_INSTALL}\"
     else
@@ -43,7 +43,7 @@ exec env -i \
         -DCMAKE_PREFIX_PATH=\"\${CMAKE_EXTRA}\"
     echo
     echo \"完成。请执行:\"
-    echo \"  source /opt/ros/foxy/setup.bash\"
+    echo \"  source /opt/ros/humble/setup.bash\"
     echo \"  source ${REPO_ROOT}/install/setup.bash\"
     echo \"  ros2 pkg prefix fast_lio\"
 "

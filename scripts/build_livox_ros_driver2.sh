@@ -1,40 +1,49 @@
 #!/usr/bin/env bash
-# 在「ROS 2 工作区根目录」下仅编译本仓库内的 livox_ros_driver2，且用 --paths 限定扫描范围。
+# 在 ROS 2 工作区根目录下仅编译 livox_ros_driver2（--paths 限定范围，避免全盘 colcon）。
 #
-# 请勿在 livox_ros_driver2 目录内执行官方 ./build.sh ROS2：该脚本会 cd ../../ 再 colcon，
-# 若 livox 位于 dong_3d_nav/livox_ros_driver2，../../ 会落到用户家目录等，导致 colcon 全盘扫包、
-# 报大量与 Livox 无关的 python_setup_py / SyntaxError 等错误。
+# 请勿在 livox 目录内对整仓执行官方 ./build.sh ROS2 且未 source humble：
+# CMake 需要 -DDISTRO_ROS=humble，否则 LIVOX_INTERFACES_INCLUDE_DIRECTORIES 为 NOTFOUND。
 #
 # 用法:
-#   source /opt/ros/foxy/setup.bash
-#   bash scripts/build_livox_ros_driver2.sh /path/to/ros2_ws
+#   source /opt/ros/humble/setup.bash
+#   bash scripts/build_livox_ros_driver2.sh              # 工作区默认为本仓库根目录
+#   bash scripts/build_livox_ros_driver2.sh ~/ros2_ws    # 指定工作区
 #
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LIVOX_DIR="${REPO_ROOT}/livox_ros_driver2"
+LIVOX_DIR=""
+for _candidate in "${REPO_ROOT}/src/livox_ros_driver2" "${REPO_ROOT}/livox_ros_driver2"; do
+  if [[ -f "${_candidate}/package.xml" ]]; then
+    LIVOX_DIR="${_candidate}"
+    break
+  fi
+done
+unset _candidate
 
-if [[ ! -f "${LIVOX_DIR}/package.xml" ]]; then
-  echo "未找到 ${LIVOX_DIR}，请先: bash scripts/sync_fastlio_mid360_deps.sh" >&2
+if [[ -z "${LIVOX_DIR}" ]]; then
+  echo "未找到 livox_ros_driver2，请先: bash scripts/sync_fastlio_mid360_deps.sh" >&2
   exit 1
 fi
 
-WS_ROOT="${1:-}"
-if [[ -z "${WS_ROOT}" ]] || [[ ! -d "${WS_ROOT}" ]]; then
-  echo "用法: bash scripts/build_livox_ros_driver2.sh <ROS2 工作区根目录>" >&2
-  echo "示例: bash scripts/build_livox_ros_driver2.sh ~/ros2_ws" >&2
+WS_ROOT="${1:-${REPO_ROOT}}"
+if [[ ! -d "${WS_ROOT}" ]]; then
+  echo "工作区目录不存在: ${WS_ROOT}" >&2
   exit 1
 fi
 
 if [[ -z "${ROS_DISTRO:-}" ]]; then
-  echo "请先 source ROS 2 环境，例如: source /opt/ros/foxy/setup.bash" >&2
+  echo "请先 source ROS 2 环境，例如: source /opt/ros/humble/setup.bash" >&2
   exit 1
 fi
 
 cd "${WS_ROOT}"
 colcon build --symlink-install --packages-select livox_ros_driver2 \
   --paths "${LIVOX_DIR}" \
-  --cmake-args -DPYTHON_EXECUTABLE=/usr/bin/python3
+  --cmake-args \
+    -DPYTHON_EXECUTABLE=/usr/bin/python3 \
+    -DROS_EDITION=ROS2 \
+    -DDISTRO_ROS="${ROS_DISTRO}"
 
 echo
 echo "完成。请执行: source ${WS_ROOT}/install/setup.bash"

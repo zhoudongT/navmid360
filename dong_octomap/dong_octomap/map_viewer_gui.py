@@ -47,7 +47,7 @@ from tf2_ros import Buffer, TransformException, TransformListener
 from visualization_msgs.msg import Marker
 try:
     from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
-except ImportError:  # Ubuntu 20.04: python3-vtk7 uses vtk.qt (VTK 8/9+ use vtkmodules).
+except ImportError:  # Ubuntu 22.04: python3-vtk9 uses vtk.qt (VTK 8/9+ use vtkmodules).
     from vtk.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 import vtk
 from vtk.util import numpy_support

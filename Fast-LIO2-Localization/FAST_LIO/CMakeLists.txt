@@ -3,7 +3,7 @@ project(fast_lio)
 
 
 # <<< dong_3d_nav: FAST_LIO ROS2 distro + rosidl patch BEGIN >>>
-# 解析 ROS 2 发行版：优先 ROS_DISTRO，其次 CMAKE_PREFIX_PATH 中的 /opt/ros/<distro>，默认 foxy。
+# 解析 ROS 2 发行版：优先 ROS_DISTRO，其次 CMAKE_PREFIX_PATH 中的 /opt/ros/<distro>，默认 humble。
 set(FASTLIO_ROS_DISTRO "$ENV{ROS_DISTRO}")
 string(STRIP "${FASTLIO_ROS_DISTRO}" FASTLIO_ROS_DISTRO)
 if(FASTLIO_ROS_DISTRO STREQUAL "")
@@ -15,7 +15,7 @@ if(FASTLIO_ROS_DISTRO STREQUAL "")
   endforeach()
 endif()
 if(FASTLIO_ROS_DISTRO STREQUAL "")
-  set(FASTLIO_ROS_DISTRO "foxy")
+  set(FASTLIO_ROS_DISTRO "humble")
 endif()
 message(STATUS "fast_lio: ROS_DISTRO resolved to '${FASTLIO_ROS_DISTRO}' (rosidl linkage)")
 # <<< dong_3d_nav: FAST_LIO ROS2 distro + rosidl patch END >>>

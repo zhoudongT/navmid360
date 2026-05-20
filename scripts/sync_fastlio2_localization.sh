@@ -84,21 +84,21 @@ fi
 
 ICP_DIR="${LOC_DIR}/icp_relocalization"
 if [[ -f "${ICP_DIR}/CMakeLists.txt" ]]; then
-  bash "${REPO_ROOT}/scripts/patch_icp_relocalization_foxy.sh" "${ICP_DIR}"
+  bash "${REPO_ROOT}/scripts/patch_icp_relocalization_humble.sh" "${ICP_DIR}"
 fi
 
 FAST_LIO_CMAKE="${LOC_DIR}/FAST_LIO/CMakeLists.txt"
 if [[ -f "${FAST_LIO_CMAKE}" ]]; then
-  echo "[sync-fl2loc] 对 FAST_LIO 应用 Foxy + rosidl 补丁…"
-  bash "${REPO_ROOT}/scripts/patch_fast_lio_polaris_foxy.sh" "${LOC_DIR}/FAST_LIO"
+  echo "[sync-fl2loc] 对 FAST_LIO 应用 Humble + rosidl 补丁…"
+  bash "${REPO_ROOT}/scripts/patch_fast_lio_polaris_humble.sh" "${LOC_DIR}/FAST_LIO"
   python3 "${REPO_ROOT}/scripts/patch_fast_lio_ros2_cmake.py" "${LOC_DIR}/FAST_LIO"
 fi
 
 echo
 echo "[sync-fl2loc] 完成。编译示例（勿与 Ericsii fast_lio 同时放入 src）："
 echo "  source /opt/ros/\${ROS_DISTRO}/setup.bash"
-echo "  bash scripts/build_icp_relocalization_foxy.sh"
-echo "  bash scripts/build_fast_lio_polaris_foxy.sh"
+echo "  bash scripts/build_icp_relocalization_humble.sh"
+echo "  bash scripts/build_fast_lio_polaris_humble.sh"
 echo
 echo "请先编辑 Fast-LIO2-Localization 内地图路径，见仓库 README 与 example.launch.py；Mid-360 需先起 Livox："
 echo "  ros2 launch dong_octomap mid360_fastlio2_localization.launch.py"

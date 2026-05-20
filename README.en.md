@@ -2,7 +2,7 @@
 
 [中文](./README.md)
 
-A ROS 2 Foxy based 3D navigation system with a Web interface. It targets the Unitree Go2 with Livox Mid-360 and [FAST_LIO_ROS2](https://github.com/Ericsii/FAST_LIO_ROS2) (`ros2` branch) for SLAM, navigation clouds, and odometry.
+A ROS 2 Humble based 3D navigation system with a Web interface. It targets the Unitree Go2 with Livox Mid-360 and [FAST_LIO_ROS2](https://github.com/Ericsii/FAST_LIO_ROS2) (`ros2` branch) for SLAM, navigation clouds, and odometry.
 
 This directory contains five ROS 2 packages:
 
@@ -37,20 +37,20 @@ dong_3d_nav/
 ├── dong_relocalization/     # Optional ICP relocalization (prior PCD + live scan)
 ├── octo_planner/        # 3D planner, controller, navigation launch files
 ├── worlds/              # Example Gazebo worlds
-└── install_deps_foxy.sh
+└── install_deps_humble.sh
 ```
 
 ## Requirements
 
-- Ubuntu 20.04
-- ROS 2 Foxy
+- Ubuntu 22.04
+- ROS 2 Humble
 - `colcon`
 - OctoMap / octomap_msgs
 - OpenCV
-- Open3D C++ (`octomap_open3d_viewer_node`, `pcd_to_octomap_node`): Ubuntu 20.04 has no `libopen3d-dev`. Running `install_deps_foxy.sh` installs **LLVM `libc++-dev` / `libc++abi-dev`** (needed to link the prebuilt `libOpen3D.so`) and extracts the official **Open3D 0.17 x86_64 devel** tree to **`~/.local/opt/open3d-0.17.0-cxx11`**. Before building, set  
+- Open3D C++ (`octomap_open3d_viewer_node`, `pcd_to_octomap_node`): Ubuntu 22.04 has no `libopen3d-dev`. Running `install_deps_humble.sh` installs **LLVM `libc++-dev` / `libc++abi-dev`** (needed to link the prebuilt `libOpen3D.so`) and extracts the official **Open3D 0.17 x86_64 devel** tree to **`~/.local/opt/open3d-0.17.0-cxx11`**. Before building, set  
   `export CMAKE_PREFIX_PATH="$HOME/.local/opt/open3d-0.17.0-cxx11:${CMAKE_PREFIX_PATH:-}"`  
   (the script’s “Next steps” section shows the same.)
-- PyQt5, VTK, NumPy, Pillow, PyYAML; map GUI also needs **`ros-foxy-sensor-msgs-py`** (`sensor_msgs_py`, included in `install_deps_foxy.sh`)
+- PyQt5, VTK, NumPy, Pillow, PyYAML; map GUI also needs **`ros-humble-sensor-msgs-py`** (`sensor_msgs_py`, included in `install_deps_humble.sh`)
 - Optional: `rosbridge_server`, used by the Web page to access ROS through websocket
 
 Before running full-stack navigation `octo_planner/launch/nav.launch.py`, add these to the same workspace:
@@ -71,7 +71,7 @@ If you previously cloned them next to `dong_3d_nav` under `src`, from this repo 
 
 ### FAST_LIO_ROS2: ROS 2 distro detection and “localization”
 
-- **CMake / distro**: run **`bash scripts/apply_fast_lio_ros2_patches.sh`** after cloning (also invoked by `sync_fastlio_mid360_deps.sh`) before `colcon build --packages-select fast_lio`. The patch resolves **`FASTLIO_ROS_DISTRO`** from `ROS_DISTRO`, then `/opt/ros/<distro>` entries in `CMAKE_PREFIX_PATH`, else defaults to **foxy**, and fixes `rosidl_*` linkage for Foxy vs newer distros.
+- **CMake / distro**: run **`bash scripts/apply_fast_lio_ros2_patches.sh`** after cloning (also invoked by `sync_fastlio_mid360_deps.sh`) before `colcon build --packages-select fast_lio`. The patch resolves **`FASTLIO_ROS_DISTRO`** from `ROS_DISTRO`, then `/opt/ros/<distro>` entries in `CMAKE_PREFIX_PATH`, else defaults to **humble**, and fixes `rosidl_*` linkage for older vs newer distros.
 - **What “localization” means here**: upstream `fastlio_mapping` is **LIO / incremental mapping**; `map_file_path` is used to **save** maps, not to load a prior map for global localization. For global alignment to a prior map, use **`dong_relocalization` (ICP)** with FAST-LIO (`mid360_localization_lio_icp.launch.py`), or the **Fast-LIO2-Localization** bundle below; other stacks include [FAST_LIO_LOCALIZATION](https://github.com/HViktorTsoi/FAST_LIO_LOCALIZATION).
 - **Suggested bring-up**: `ros2 launch dong_octomap mid360_localization_lio_icp.launch.py prior_pcd_path:=/path/to/map.pcd` (FAST-LIO params from `dong_octomap/config/mid360_fastlio_localization.yaml`; ICP params still in `dong_relocalization/config/relocalization_icp.yaml`).
 
@@ -98,7 +98,7 @@ bash scripts/sync_fastlio2_localization.sh
 
 ### Livox Mid-360 (`livox_ros_driver2`) troubleshooting
 
-1. **Do not run upstream `./build.sh ROS2` inside `livox_ros_driver2`**: that script `cd ../../` then runs `colcon build`, assuming `ws/src/livox_ros_driver2`. With Livox cloned under **`dong_3d_nav/livox_ros_driver2`**, `../../` can land on your home directory and colcon will crawl unrelated trees (Qt, conda, numpy, …), producing floods of **`python_setup_py` / `SyntaxError`**. Build from the workspace root with **`--paths` pointing at this repo’s livox folder**, or run **`bash scripts/build_livox_ros_driver2.sh ~/your/ros2_ws`** after `source /opt/ros/foxy/setup.bash`.
+1. **Do not run upstream `./build.sh ROS2` inside `livox_ros_driver2`**: that script `cd ../../` then runs `colcon build`, assuming `ws/src/livox_ros_driver2`. With Livox cloned under **`dong_3d_nav/livox_ros_driver2`**, `../../` can land on your home directory and colcon will crawl unrelated trees (Qt, conda, numpy, …), producing floods of **`python_setup_py` / `SyntaxError`**. Build from the workspace root with **`--paths` pointing at this repo’s livox folder**, or run **`bash scripts/build_livox_ros_driver2.sh ~/your/ros2_ws`** after `source /opt/ros/humble/setup.bash`.
 2. **CMake cannot find `liblivox_lidar_sdk_shared.so` / Livox headers**: install [Livox-SDK2](https://github.com/Livox-SDK/Livox-SDK2) per upstream (`sudo make install` so `/usr/local/lib` and includes are populated).
 3. **`Init lds lidar fail!`**: invalid path to `MID360_config.json`, bad JSON, or SDK/driver mismatch. After editing JSON, rebuild and `source install` if not using symlink install. Prefer `ros2 launch dong_octomap mid360_livox_driver.launch.py` (absolute default path to the JSON in share); override with `livox_user_config_path:=...` if needed.
 4. **Networking**: `host_net_info` IPs must match the **NIC** that actually talks to the lidar; `lidar_configs` `ip` must be the **lidar’s** IP. Ensure L2 connectivity and UDP ports (often ~56100–56501) are not blocked by firewall.
@@ -113,20 +113,20 @@ Use the helper script:
 
 ```bash
 cd ~/ros2_ws/src/dong_3d_nav
-bash install_deps_foxy.sh
+bash install_deps_humble.sh
 ```
 
 If CMake cannot find Open3D, run the dependency script and export `CMAKE_PREFIX_PATH` as above, or install another Open3D C++ tree that provides `Open3DConfig.cmake`.
 
 ## Build
 
-If **Miniconda / Anaconda** is installed, **`conda deactivate`** until your prompt shows no `(base)` (or other env) before building; otherwise CMake may pick conda’s Python (e.g. 3.13), which breaks Foxy’s ROSIDL / `empy` and fails while generating `dong_map_msgs`. The `install_deps_foxy.sh` script strips conda from `PATH` for its own run; for **`colcon build`** in your own shell you still need to leave conda off or pass the system interpreter (below).
+If **Miniconda / Anaconda** is installed, **`conda deactivate`** until your prompt shows no `(base)` (or other env) before building; otherwise CMake may pick conda’s Python (e.g. 3.13), which breaks Humble's ROSIDL / `empy` and fails while generating `dong_map_msgs`. The `install_deps_humble.sh` script strips conda from `PATH` for its own run; for **`colcon build`** in your own shell you still need to leave conda off or pass the system interpreter (below).
 
 From the ROS 2 workspace root:
 
 ```bash
 cd ~/ros2_ws
-source /opt/ros/foxy/setup.bash
+source /opt/ros/humble/setup.bash
 export CMAKE_PREFIX_PATH="${HOME}/.local/opt/open3d-0.17.0-cxx11:${CMAKE_PREFIX_PATH:-}"
 colcon build --packages-select dong_map_msgs dong_octomap octo_planner \
   --cmake-args -DPYTHON_EXECUTABLE=/usr/bin/python3
@@ -139,7 +139,7 @@ If the source directory has been moved, old CMake cache may still point to an ol
 
 ```bash
 cd ~/ros2_ws
-source /opt/ros/foxy/setup.bash
+source /opt/ros/humble/setup.bash
 export CMAKE_PREFIX_PATH="${HOME}/.local/opt/open3d-0.17.0-cxx11:${CMAKE_PREFIX_PATH:-}"
 colcon build --packages-select dong_map_msgs dong_octomap octo_planner \
   --cmake-clean-cache --cmake-args -DPYTHON_EXECUTABLE=/usr/bin/python3

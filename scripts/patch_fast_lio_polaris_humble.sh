@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Polaris Fast-LIO2-Localization/FAST_LIO 在 Foxy 下的源码补丁（可重复执行）：
+# Polaris Fast-LIO2-Localization/FAST_LIO 在 Humble 下的源码补丁（可重复执行）：
 # - pcl_ros::transformPointCloud → pcl::transformPointCloud + Eigen
-# - tf2_geometry_msgs.hpp → tf2_geometry_msgs.h（Foxy）
+# - tf2_geometry_msgs.h → tf2_geometry_msgs.hpp（Humble）
 # - CMake/package.xml 去掉 pcl_ros 依赖
 #
 # 用法:
-#   bash scripts/patch_fast_lio_polaris_foxy.sh
-#   bash scripts/patch_fast_lio_polaris_foxy.sh /path/to/FAST_LIO
+#   bash scripts/patch_fast_lio_polaris_humble.sh
+#   bash scripts/patch_fast_lio_polaris_humble.sh /path/to/FAST_LIO
 #
 set -euo pipefail
 
@@ -26,9 +26,12 @@ if grep -q 'pcl_ros/transforms.hpp' "${LASER_CPP}"; then
   echo "已替换 laserMapping.cpp 中的 pcl_ros/transforms.hpp"
 fi
 
-if grep -q 'tf2_geometry_msgs/tf2_geometry_msgs.hpp' "${LASER_CPP}"; then
-  sed -i 's|tf2_geometry_msgs/tf2_geometry_msgs.hpp|tf2_geometry_msgs/tf2_geometry_msgs.h|' "${LASER_CPP}"
-  echo "已修正 tf2_geometry_msgs 头文件（Foxy）"
+if grep -q 'tf2_geometry_msgs/tf2_geometry_msgs.hpppp' "${LASER_CPP}"; then
+  sed -i 's|tf2_geometry_msgs/tf2_geometry_msgs\.hpppp|tf2_geometry_msgs/tf2_geometry_msgs.hpp|g' "${LASER_CPP}"
+  echo "已修正 laserMapping.cpp 中重复的 hpp 后缀"
+elif grep -qE 'tf2_geometry_msgs/tf2_geometry_msgs\.h([^p]|")' "${LASER_CPP}"; then
+  sed -i 's|tf2_geometry_msgs/tf2_geometry_msgs\.h"|tf2_geometry_msgs/tf2_geometry_msgs.hpp"|g' "${LASER_CPP}"
+  echo "已修正 tf2_geometry_msgs 头文件（Humble）"
 fi
 
 if grep -q 'pcl_ros::transformPointCloud' "${LASER_CPP}"; then
@@ -65,10 +68,11 @@ if [[ -f "${PKG_XML}" ]] && grep -q '<depend>pcl_ros</depend>' "${PKG_XML}"; the
   echo "已从 package.xml 移除 pcl_ros"
 fi
 
-if grep -q 'Trigger::Request::ConstSharedPtr' "${LASER_CPP}"; then
-  sed -i 's/std_srvs::srv::Trigger::Request::ConstSharedPtr req/const std::shared_ptr<std_srvs::srv::Trigger::Request> req/' "${LASER_CPP}"
-  sed -i 's/std_srvs::srv::Trigger::Response::SharedPtr res/std::shared_ptr<std_srvs::srv::Trigger::Response> res/' "${LASER_CPP}"
-  echo "已修正 map_save_callback 为 Foxy service 签名"
+if grep -q 'std_srvs::srv::Trigger::Request> req' "${LASER_CPP}" && \
+   ! grep -q 'Trigger::Request::ConstSharedPtr' "${LASER_CPP}"; then
+  sed -i 's/const std::shared_ptr<std_srvs::srv::Trigger::Request> req/std_srvs::srv::Trigger::Request::ConstSharedPtr req/' "${LASER_CPP}"
+  sed -i 's/std::shared_ptr<std_srvs::srv::Trigger::Response> res/std_srvs::srv::Trigger::Response::SharedPtr res/' "${LASER_CPP}"
+  echo "已修正 map_save_callback 为 Humble service 签名"
 fi
 
-echo "Polaris fast_lio Foxy 补丁检查完成。编译: bash scripts/build_fast_lio_polaris_foxy.sh"
+echo "Polaris fast_lio Humble 补丁检查完成。编译: bash scripts/build_fast_lio_polaris_humble.sh"

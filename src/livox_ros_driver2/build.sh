@@ -25,6 +25,7 @@ ROS_DISTRO=""
 # Set working ROS version
 if [ "$1" = "ROS2" ]; then
     ROS_VERSION=${VERSION_ROS2}
+    # 使用当前 shell 的 ROS_DISTRO（source /opt/ros/humble/setup.bash 后为 humble）
 elif [ "$1" = "humble" ]; then
     ROS_VERSION=${VERSION_ROS2}
     ROS_DISTRO=${VERSION_HUMBLE}
@@ -72,7 +73,7 @@ if [ $ROS_VERSION = ${VERSION_ROS1} ]; then
     catkin_make -DROS_EDITION=${VERSION_ROS1}
 elif [ $ROS_VERSION = ${VERSION_ROS2} ]; then
     cd "${WS_ROOT}"
-    colcon build --cmake-args -DROS_EDITION=${VERSION_ROS2} -DDISTRO_ROS=${ROS_DISTRO}
+    colcon build --cmake-args -DROS_EDITION=${VERSION_ROS2} -DDISTRO_ROS=${ROS_DISTRO:-}
 fi
 popd > /dev/null
 

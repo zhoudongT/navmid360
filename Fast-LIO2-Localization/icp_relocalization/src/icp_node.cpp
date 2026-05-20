@@ -12,7 +12,7 @@
 #include <tf2/LinearMath/Matrix3x3.h>
 #include <tf2/LinearMath/Transform.h>
 #include <tf2/transform_datatypes.h>
-#include "tf2_geometry_msgs/tf2_geometry_msgs.h"
+#include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
 #ifdef USE_LIVOX
 #include <livox_ros_driver2/msg/custom_msg.hpp>
 #endif

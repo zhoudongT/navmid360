@@ -2,7 +2,7 @@
 
 [English](./README.en.md)
 
-一套基于 ROS 2 Foxy 的 3D 导航系统，通过 Web 界面交互。本系统面向宇树 Go2，并采用 Livox Mid-360 与 [FAST_LIO_ROS2](https://github.com/Ericsii/FAST_LIO_ROS2)（`ros2` 分支）提供 SLAM / 导航点云与里程计。
+一套基于 ROS 2 Humble 的 3D 导航系统，通过 Web 界面交互。本系统面向宇树 Go2，并采用 Livox Mid-360 与 [FAST_LIO_ROS2](https://github.com/Ericsii/FAST_LIO_ROS2)（`ros2` 分支）提供 SLAM / 导航点云与里程计。
 
 本目录包含五个 ROS 2 包：
 
@@ -37,20 +37,20 @@ dong_3d_nav/
 ├── dong_relocalization/     # ICP 重定位（先验 PCD + 实时点云）
 ├── octo_planner/        # 3D 路径规划、控制器、导航 launch
 ├── worlds/              # 示例 Gazebo world
-└── install_deps_foxy.sh
+└── install_deps_humble.sh
 ```
 
 ## 环境要求
 
-- Ubuntu 20.04
-- ROS 2 Foxy
+- Ubuntu 22.04
+- ROS 2 Humble
 - `colcon`
 - OctoMap / octomap_msgs
 - OpenCV
-- Open3D C++（`octomap_open3d_viewer_node`、`pcd_to_octomap_node`）：Ubuntu 20.04 无官方 `libopen3d-dev`。运行 `install_deps_foxy.sh` 会安装 **LLVM `libc++-dev` / `libc++abi-dev`**，并把官方 **Open3D 0.17 x86_64 devel** 解压到 **`~/.local/opt/open3d-0.17.0-cxx11`**；编译前请设置  
+- Open3D C++（`octomap_open3d_viewer_node`、`pcd_to_octomap_node`）：Ubuntu 22.04 无官方 `libopen3d-dev`。运行 `install_deps_humble.sh` 会安装 **LLVM `libc++-dev` / `libc++abi-dev`**，并把官方 **Open3D 0.17 x86_64 devel** 解压到 **`~/.local/opt/open3d-0.17.0-cxx11`**；编译前请设置  
   `export CMAKE_PREFIX_PATH="$HOME/.local/opt/open3d-0.17.0-cxx11:${CMAKE_PREFIX_PATH:-}"`  
   （脚本结束时的 “Next steps” 里也有同样示例。）
-- PyQt5、VTK、NumPy、Pillow、PyYAML；地图管理/编辑 GUI 还需 **`ros-foxy-sensor-msgs-py`**（`sensor_msgs_py`，已写入 `install_deps_foxy.sh`）
+- PyQt5、VTK、NumPy、Pillow、PyYAML；地图管理/编辑 GUI 还需 **`ros-humble-sensor-msgs-py`**（`sensor_msgs_py`，已写入 `install_deps_humble.sh`）
 - 可选：`rosbridge_server`，用于 Web 页面通过 websocket 访问 ROS
 
 运行整机导航 `octo_planner/launch/nav.launch.py` 前，请在工作区额外准备：
@@ -71,7 +71,7 @@ bash scripts/sync_fastlio_mid360_deps.sh
 
 ### FAST_LIO_ROS2：ROS 2 发行版与「定位」
 
-- **发行版 / CMake**：上游 `CMakeLists.txt` 用 `ROS_DISTRO` 选择 `rosidl_target_interfaces` 与 `rosidl_get_typesupport_target`；在 **未 `source` ROS** 或 **`ROS_DISTRO` 为空** 时易配置失败。克隆后请执行 **`bash scripts/apply_fast_lio_ros2_patches.sh`**（`sync_fastlio_mid360_deps.sh` 已自动调用），再 `colcon build --packages-select fast_lio`。补丁会写入 **`FASTLIO_ROS_DISTRO`**：依次读环境变量、`CMAKE_PREFIX_PATH` 中的 `/opt/ros/<distro>`，否则默认 **foxy**。
+- **发行版 / CMake**：上游 `CMakeLists.txt` 用 `ROS_DISTRO` 选择 `rosidl_target_interfaces` 与 `rosidl_get_typesupport_target`；在 **未 `source` ROS** 或 **`ROS_DISTRO` 为空** 时易配置失败。克隆后请执行 **`bash scripts/apply_fast_lio_ros2_patches.sh`**（`sync_fastlio_mid360_deps.sh` 已自动调用），再 `colcon build --packages-select fast_lio`。补丁会写入 **`FASTLIO_ROS_DISTRO`**：依次读环境变量、`CMAKE_PREFIX_PATH` 中的 `/opt/ros/<distro>`，否则默认 **humble**。
 - **定位能力说明**：Ericsii 主线 **`fastlio_mapping` 为 LIO / 增量建图**，`map_file_path` 在源码侧用于 **保存** 地图，**不是**加载先验 PCD 做全局定位。若要在先验地图上全局对齐，可使用本仓库 **`dong_relocalization`（ICP）** + FAST-LIO（见 `mid360_localization_lio_icp.launch.py`），或使用下节 **Fast-LIO2-Localization**；亦可参考 [FAST_LIO_LOCALIZATION](https://github.com/HViktorTsoi/FAST_LIO_LOCALIZATION) 等其它 ROS 2 移植。
 - **推荐一键（LIO 定位向参数 + ICP）**：`ros2 launch dong_octomap mid360_localization_lio_icp.launch.py prior_pcd_path:=/path/to/map.pcd`（FAST-LIO 使用 `dong_octomap/config/mid360_fastlio_localization.yaml`：降低地图发布、关连续 PCD 保存、默认可关外参在线估计；ICP 参数仍见 `dong_relocalization/config/relocalization_icp.yaml`）。
 
@@ -100,7 +100,7 @@ bash scripts/sync_fastlio2_localization.sh
 
 ### Livox Mid-360（livox_ros_driver2）常见问题
 
-1. **切勿在 `livox_ros_driver2` 里执行官方 `./build.sh ROS2`**：该脚本会 **`cd ../../`** 再 `colcon build`，假定目录为 `工作区/src/livox_ros_driver2`。若 Livox 克隆在 **`dong_3d_nav/livox_ros_driver2`**，`../../` 会落到家目录等，colcon 会全盘扫到 Qt / conda / numpy 等无关 `setup.py`，终端里出现成串 **`python_setup_py` / `SyntaxError`**。请在工作区根目录使用 **`--paths` 只指向本仓库内的 livox 目录**，或运行本仓库 **`bash scripts/build_livox_ros_driver2.sh ~/你的/ros2_ws`**（需已 `source /opt/ros/foxy/setup.bash`）。
+1. **切勿在 `livox_ros_driver2` 里执行官方 `./build.sh ROS2`**：该脚本会 **`cd ../../`** 再 `colcon build`，假定目录为 `工作区/src/livox_ros_driver2`。若 Livox 克隆在 **`dong_3d_nav/livox_ros_driver2`**，`../../` 会落到家目录等，colcon 会全盘扫到 Qt / conda / numpy 等无关 `setup.py`，终端里出现成串 **`python_setup_py` / `SyntaxError`**。请在工作区根目录使用 **`--paths` 只指向本仓库内的 livox 目录**，或运行本仓库 **`bash scripts/build_livox_ros_driver2.sh ~/你的/ros2_ws`**（需已 `source /opt/ros/humble/setup.bash`）。
 2. **编译阶段 CMake 报错找不到 `liblivox_lidar_sdk_shared.so` / `livox_lidar_api.h`**：须先按 [Livox-SDK2](https://github.com/Livox-SDK/Livox-SDK2) 官方说明编译并 **`sudo make install`**，使库与头文件出现在 **`/usr/local/lib`**、**/usr/local/include**（或按官方路径设置 `CMAKE_PREFIX_PATH`）。
 3. **运行日志 `Init lds lidar fail!`**：多为 **`MID360_config.json`** 路径错误、JSON 语法错误，或 **Livox-SDK2 版本与驱动不匹配**。改配置后若未用 symlink 安装，需 **`colcon build` 再 `source install`**。推荐用本仓库 **`ros2 launch dong_octomap mid360_livox_driver.launch.py`**，默认使用包内 **绝对路径** 指向 `MID360_config.json`；也可用 `livox_user_config_path:=/你的路径/MID360_config.json`。
 4. **网络**：`host_net_info` 里的本机 IP 必须是 **与雷达通信的那块网卡**上真实存在的地址（例如 `192.168.123.220`）；`lidar_configs` 里的 **`ip`** 必须是 **雷达当前 IP**（可用 Livox Viewer 或路由器里查看）。PC 与雷达需 **二层互通**，必要时临时关闭防火墙或放行 **UDP 56100–56501** 一带端口。
@@ -115,20 +115,20 @@ bash scripts/sync_fastlio2_localization.sh
 
 ```bash
 cd ~/ros2_ws/src/dong_3d_nav
-bash install_deps_foxy.sh
+bash install_deps_humble.sh
 ```
 
 如果 CMake 找不到 Open3D，请确认已执行依赖脚本并设置了上文的 `CMAKE_PREFIX_PATH`；或自行安装带 `Open3DConfig.cmake` 的 Open3D C++ 开发树。
 
 ## 编译
 
-若本机装有 **Miniconda / Anaconda**，请先 **`conda deactivate`** 直到命令行不再带 `(base)` 等环境名，再编译；否则 CMake 容易选到 conda 里的 Python（例如 3.13），与 Foxy 自带的 ROSIDL / `empy` 不兼容，`dong_map_msgs` 会在生成接口时报错。依赖安装脚本会在运行时临时从 `PATH` 中去掉 conda 目录；你在自己终端里 **`colcon build`** 时仍需自行退出 conda 或显式指定系统解释器（见下）。
+若本机装有 **Miniconda / Anaconda**，请先 **`conda deactivate`** 直到命令行不再带 `(base)` 等环境名，再编译；否则 CMake 容易选到 conda 里的 Python（例如 3.13），与 Humble 自带的 ROSIDL / `empy` 不兼容，`dong_map_msgs` 会在生成接口时报错。依赖安装脚本会在运行时临时从 `PATH` 中去掉 conda 目录；你在自己终端里 **`colcon build`** 时仍需自行退出 conda 或显式指定系统解释器（见下）。
 
 从 ROS 2 工作区根目录编译：
 
 ```bash
 cd ~/ros2_ws
-source /opt/ros/foxy/setup.bash
+source /opt/ros/humble/setup.bash
 export CMAKE_PREFIX_PATH="${HOME}/.local/opt/open3d-0.17.0-cxx11:${CMAKE_PREFIX_PATH:-}"
 colcon build --packages-select dong_map_msgs dong_octomap octo_planner \
   --cmake-args -DPYTHON_EXECUTABLE=/usr/bin/python3
@@ -141,7 +141,7 @@ source install/setup.bash
 
 ```bash
 cd ~/ros2_ws
-source /opt/ros/foxy/setup.bash
+source /opt/ros/humble/setup.bash
 export CMAKE_PREFIX_PATH="${HOME}/.local/opt/open3d-0.17.0-cxx11:${CMAKE_PREFIX_PATH:-}"
 colcon build --packages-select dong_map_msgs dong_octomap octo_planner \
   --cmake-clean-cache --cmake-args -DPYTHON_EXECUTABLE=/usr/bin/python3
@@ -245,19 +245,19 @@ ros2 launch dong_octomap map_manager.launch.py
 
 ## Web 可视化
 
-### ROS Foxy：网页加载地图（推荐步骤）
+### ROS Humble：网页加载地图（推荐步骤）
 
 1. **安装 rosbridge**（网页通过 WebSocket 连 ROS；未装则页面一直「未连接」）：
 
    ```bash
    sudo apt update
-   sudo apt install ros-foxy-rosbridge-server
+   sudo apt install ros-humble-rosbridge-server
    ```
 
-2. **新开一个终端**，只加载 Foxy 与工作区（避免与 Noetic / 其它 ROS 2 发行版混用）：
+2. **新开一个终端**，只加载 Humble 与工作区（避免与 Noetic / 其它 ROS 2 发行版混用）：
 
    ```bash
-   source /opt/ros/foxy/setup.bash
+   source /opt/ros/humble/setup.bash
    cd /你的/colcon工作区   # 例如 ~/ros2_ws，且已 colcon build 过 dong_octomap 等包
    source install/setup.bash
    ```
@@ -293,7 +293,7 @@ ros2 launch dong_octomap web_octomap.launch.py map_package:=~/maps/map launch_ro
 
 - `map_package`：已保存的地图包目录。
 - `http_port`：静态 Web 服务端口，默认 `8080`。
-- `launch_rosbridge`：是否启动 `rosbridge_websocket`；**网页联调请设为 `true`**（并先安装 `ros-foxy-rosbridge-server`）。
+- `launch_rosbridge`：是否启动 `rosbridge_websocket`；**网页联调请设为 `true`**（并先安装 `ros-humble-rosbridge-server`）。
 - `launch_map_gui`：是否同时启动 Qt 保存/加载窗口。
 - `workspace_setup_bash`：自动 `load_package` 前额外 `source` 的路径；留空则尝试从本包安装路径推断工作区 `install/setup.bash`。
 - **规划对齐**：`web_octomap.launch.py` 内 `dong_path_node` 与 `map_manager.launch.py` 使用相同参数。桌面 `map_viewer_gui` 发布 **VTK 拾取原始坐标**，由 `dong_path_node` 的 `findNearestFreeCell` 吸附。网页 **`main.js` 直接发布 `/start_point`、`/goal_point`**（不经过 `web_click_selector`）；射线命中可通行 mesh 后已将交点 **吸附到与 OctoMap 一致的体素中心** `(floor(x/r)+0.5)*r`，与 C++ `worldToGrid`/`gridToWorld` 一致，避免落在立方体表面任意点导致与桌面路径不一致。A* 邻居方向已排序。

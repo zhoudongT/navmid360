@@ -5,7 +5,7 @@
 
 用法::
 
-    source /opt/ros/foxy/setup.bash
+    source /opt/ros/humble/setup.bash
     source ~/dong_3d_nav/install/setup.bash
 
     # 导航定位（默认先验图 + 重定位）

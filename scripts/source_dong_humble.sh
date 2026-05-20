@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# 干净加载 Foxy + 本工作区，避免与 Noetic 混用导致 bad_alloc / librclcpp not found。
-# 用法: source /home/allen/dong_3d_nav/scripts/source_dong_foxy.sh
+# 干净加载 Humble + 本工作区，避免与 Noetic 混用导致 bad_alloc / librclcpp not found。
+# 用法: source /path/to/navmid360/scripts/source_dong_humble.sh
 #
 # 注意：勿 source install/setup.bash —— 该文件在 colcon 生成时若曾加载 Noetic，
 # 会把 /opt/ros/noetic 链进环境，Fast-DDS 会反复打印 bad_alloc caught。
@@ -12,7 +12,7 @@ _dong_strip_ros1_paths() {
   local _val="${!_name:-}"
   [[ -z "${_val}" ]] && return 0
   _val="$(echo ":${_val}:" | tr ':' '\n' | grep -v '/opt/ros/noetic' \
-    | grep -v 'robot-control/devel' | grep -v '^$' | paste -sd: -)"
+    | grep -v 'robot-control/devel' | grep -v '/opt/MVS' | grep -v '^$' | paste -sd: -)"
   _val="${_val#:}"
   _val="${_val%:}"
   export "${_name}=${_val}"
@@ -28,7 +28,7 @@ _dong_strip_ros1_paths PATH
 _dong_strip_ros1_paths CMAKE_PREFIX_PATH
 _dong_strip_ros1_paths AMENT_PREFIX_PATH
 
-source /opt/ros/foxy/setup.bash
+source /opt/ros/humble/setup.bash
 # 只叠加本工作区包，不 source install/setup.bash（避免 colcon 前缀链里的 Noetic）
 if [[ -f "${DONG_ROOT}/install/local_setup.bash" ]]; then
   source "${DONG_ROOT}/install/local_setup.bash"
@@ -39,11 +39,17 @@ _dong_strip_ros1_paths CMAKE_PREFIX_PATH
 _dong_strip_ros1_paths AMENT_PREFIX_PATH
 unset -f _dong_strip_ros1_paths
 
-# 保证 Foxy 库优先（避免 ~/.bashrc 里 Noetic 的 LD_LIBRARY_PATH 覆盖）
-FOXY_LIB="/opt/ros/foxy/lib"
-FOXY_LIB_ARCH="/opt/ros/foxy/lib/x86_64-linux-gnu"
+# 系统 libusb 优先（~/.bashrc 里海康 MVS 的 /opt/MVS/lib/64/libusb 过旧，会导致 PCL 报 libusb_set_option）
+case ":${LD_LIBRARY_PATH:-}:" in
+  *":/lib/x86_64-linux-gnu:"*) ;;
+  *) export LD_LIBRARY_PATH="/lib/x86_64-linux-gnu${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}" ;;
+esac
+
+# 保证 Humble 库优先（避免 ~/.bashrc 里 Noetic 的 LD_LIBRARY_PATH 覆盖）
+HUMBLE_LIB="/opt/ros/humble/lib"
+HUMBLE_LIB_ARCH="/opt/ros/humble/lib/x86_64-linux-gnu"
 DONG_LIB="${DONG_ROOT}/install/lib"
-for _p in "${FOXY_LIB_ARCH}" "${FOXY_LIB}" "${DONG_LIB}"; do
+for _p in "${HUMBLE_LIB_ARCH}" "${HUMBLE_LIB}" "${DONG_LIB}"; do
   if [[ -d "${_p}" ]]; then
     case ":${LD_LIBRARY_PATH:-}:" in
       *":${_p}:"*) ;;
@@ -51,7 +57,7 @@ for _p in "${FOXY_LIB_ARCH}" "${FOXY_LIB}" "${DONG_LIB}"; do
     esac
   fi
 done
-unset _p FOXY_LIB FOXY_LIB_ARCH DONG_LIB
+unset _p HUMBLE_LIB HUMBLE_LIB_ARCH DONG_LIB
 
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-0}"
 

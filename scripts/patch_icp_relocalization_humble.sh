@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Polaris icp_relocalization 在 Foxy 下的构建补丁：
+# Polaris icp_relocalization 在 Humble 下的构建补丁：
 # - 移除未使用的 octomap_ros
-# - 用 pcl_conversions + PCL 替代 pcl_ros（未装 ros-foxy-pcl-ros 时也能编）
+# - 用 pcl_conversions + PCL 替代 pcl_ros（未装 ros-humble-pcl-ros 时也能编）
 # - 默认不编 sac_ia_gicp（example.launch 未使用）
 #
 # 用法:
-#   bash scripts/patch_icp_relocalization_foxy.sh [icp_relocalization目录]
+#   bash scripts/patch_icp_relocalization_humble.sh [icp_relocalization目录]
 #
 set -euo pipefail
 
@@ -21,9 +21,14 @@ if [[ ! -f "${ICP_CMAKE}" ]]; then
   exit 1
 fi
 
-if [[ -f "${ICP_CPP}" ]] && grep -q 'tf2_geometry_msgs/tf2_geometry_msgs.hpp' "${ICP_CPP}"; then
-  sed -i 's|tf2_geometry_msgs/tf2_geometry_msgs.hpp|tf2_geometry_msgs/tf2_geometry_msgs.h|' "${ICP_CPP}"
-  echo "已修正 icp_node.cpp 中 tf2_geometry_msgs 头文件（Foxy）。"
+if [[ -f "${ICP_CPP}" ]]; then
+  if grep -q 'tf2_geometry_msgs/tf2_geometry_msgs.hpppp' "${ICP_CPP}"; then
+    sed -i 's|tf2_geometry_msgs/tf2_geometry_msgs\.hpppp|tf2_geometry_msgs/tf2_geometry_msgs.hpp|g' "${ICP_CPP}"
+    echo "已修正 icp_node.cpp 中重复的 hpp 后缀。"
+  elif grep -qE 'tf2_geometry_msgs/tf2_geometry_msgs\.h([^p]|")' "${ICP_CPP}"; then
+    sed -i 's|tf2_geometry_msgs/tf2_geometry_msgs\.h"|tf2_geometry_msgs/tf2_geometry_msgs.hpp"|g' "${ICP_CPP}"
+    echo "已修正 icp_node.cpp 中 tf2_geometry_msgs 头文件（Humble）。"
+  fi
 fi
 
 if grep -q 'find_package(octomap_ros REQUIRED)' "${ICP_CMAKE}"; then
@@ -51,6 +56,13 @@ if [[ -f "${ICP_PKG}" ]] && grep -q '<build_depend>pcl_ros</build_depend>' "${IC
   echo "已更新 package.xml 依赖。"
 fi
 
+if [[ -f "${ICP_PKG}" ]] && ! grep -q 'livox_ros_driver2' "${ICP_PKG}"; then
+  sed -i '/<build_depend>libpcl-all-dev<\/build_depend>/a\
+  <build_depend>livox_ros_driver2</build_depend>\
+  <exec_depend>livox_ros_driver2</exec_depend>' "${ICP_PKG}"
+  echo "已在 package.xml 加入 livox_ros_driver2 依赖（保证 colcon 先编 Livox）。"
+fi
+
 # example.launch 未使用 sac_ia_gicp；跳过可加快编译并避免额外 PCL 链接问题
 if grep -q 'sac_ia_gicp' "${ICP_CMAKE}"; then
   sed -i '/^add_executable(sac_ia_gicp/,/^)$/d' "${ICP_CMAKE}"
@@ -59,4 +71,4 @@ if grep -q 'sac_ia_gicp' "${ICP_CMAKE}"; then
   echo "已跳过 sac_ia_gicp 目标（上游 example 未使用）。"
 fi
 
-echo "当前 ${ICP_CMAKE} 已按 Foxy 维护。编译: bash scripts/build_icp_relocalization_foxy.sh"
+echo "当前 ${ICP_CMAKE} 已按 Humble 维护。编译: bash scripts/build_icp_relocalization_humble.sh"

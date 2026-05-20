@@ -18,9 +18,17 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction, TimerAction
+from launch.actions import DeclareLaunchArgument, OpaqueFunction, SetEnvironmentVariable, TimerAction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+
+
+def _sanitize_ld_library_path() -> str:
+    """海康 MVS 自带的 libusb 过旧，会导致 libpcl_io 报 libusb_set_option 未定义。"""
+    parts = [p for p in os.environ.get("LD_LIBRARY_PATH", "").split(":") if p and "/opt/MVS" not in p]
+    if "/lib/x86_64-linux-gnu" not in parts:
+        parts.insert(0, "/lib/x86_64-linux-gnu")
+    return ":".join(parts)
 
 
 def _setup(context, *args, **kwargs):
@@ -128,6 +136,10 @@ def _setup(context, *args, **kwargs):
 def generate_launch_description():
     return LaunchDescription(
         [
+            SetEnvironmentVariable(
+                name="LD_LIBRARY_PATH",
+                value=_sanitize_ld_library_path(),
+            ),
             DeclareLaunchArgument(
                 "prior_pcd_path",
                 default_value="/home/allen/maps/scans_0.5m.pcd",

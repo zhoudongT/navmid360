@@ -9,7 +9,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GO2_URL="https://github.com/Unitree-Go2-Robot/go2_description.git"
-GO2_BRANCH="foxy-devel"
+GO2_BRANCH="humble-devel"
 GO2_DIR="${REPO_ROOT}/go2_description"
 DO_BUILD=false
 
@@ -47,7 +47,7 @@ if [[ "${DO_BUILD}" == "true" ]]; then
   echo "[sync] colcon build --packages-select go2_description …"
   set +u
   # shellcheck source=/dev/null
-  source "/opt/ros/${ROS_DISTRO:-foxy}/setup.bash"
+  source "/opt/ros/${ROS_DISTRO:-humble}/setup.bash"
   set -u
   cd "${REPO_ROOT}"
   colcon build --symlink-install --packages-select go2_description \
@@ -59,7 +59,7 @@ echo
 echo "[sync] go2_description 就绪: ${GO2_DIR}"
 echo "  URDF: ${GO2_DIR}/urdf/go2_description.urdf"
 echo "  若未使用 --build，请手动:"
-echo "    source /opt/ros/foxy/setup.bash && cd ${REPO_ROOT}"
+echo "    source /opt/ros/humble/setup.bash && cd ${REPO_ROOT}"
 echo "    colcon build --symlink-install --packages-select go2_description \\"
 echo "      --cmake-args -DPYTHON_EXECUTABLE=/usr/bin/python3"
 echo "    source install/setup.bash"

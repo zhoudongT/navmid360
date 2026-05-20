@@ -2,11 +2,11 @@
 """为 Ericsii/FAST_LIO_ROS2（ros2 分支）的 CMakeLists.txt 打补丁（可重复执行）。
 
 上游问题简述:
-1. ``if($ENV{ROS_DISTRO} IN_LIST ...)`` 未加引号，且 ROS_DISTRO 为空时会误走 ``rosidl_get_typesupport_target``（Foxy 无此命令）。
+1. ``if($ENV{ROS_DISTRO} IN_LIST ...)`` 未加引号，且 ROS_DISTRO 为空时会误走 ``rosidl_get_typesupport_target``（旧发行版无此命令）。
 2. colcon 子进程里 ROS_DISTRO 可能未设置。
 
 补丁内容:
-- 在 ``project(fast_lio)`` 后插入：从环境变量、CMAKE_PREFIX_PATH（/opt/ros/<distro>）解析 FASTLIO_ROS_DISTRO，否则默认 foxy。
+- 在 ``project(fast_lio)`` 后插入：从环境变量、CMAKE_PREFIX_PATH（/opt/ros/<distro>）解析 FASTLIO_ROS_DISTRO，否则默认 humble。
 - 用带 ``elseif(COMMAND rosidl_get_typesupport_target)`` 的分支替换原 rosidl 链接块。
 
 用法:
@@ -23,7 +23,7 @@ MARKER_END = "# <<< dong_3d_nav: FAST_LIO ROS2 distro + rosidl patch END >>>\n"
 
 INSERT_PROJECT_BLOCK = (
     MARKER_BEGIN
-    + "# 解析 ROS 2 发行版：优先 ROS_DISTRO，其次 CMAKE_PREFIX_PATH 中的 /opt/ros/<distro>，默认 foxy。\n"
+    + "# 解析 ROS 2 发行版：优先 ROS_DISTRO，其次 CMAKE_PREFIX_PATH 中的 /opt/ros/<distro>，默认 humble。\n"
     + "set(FASTLIO_ROS_DISTRO \"$ENV{ROS_DISTRO}\")\n"
     + "string(STRIP \"${FASTLIO_ROS_DISTRO}\" FASTLIO_ROS_DISTRO)\n"
     + "if(FASTLIO_ROS_DISTRO STREQUAL \"\")\n"
@@ -35,7 +35,7 @@ INSERT_PROJECT_BLOCK = (
     + "  endforeach()\n"
     + "endif()\n"
     + "if(FASTLIO_ROS_DISTRO STREQUAL \"\")\n"
-    + "  set(FASTLIO_ROS_DISTRO \"foxy\")\n"
+    + "  set(FASTLIO_ROS_DISTRO \"humble\")\n"
     + "endif()\n"
     + "message(STATUS \"fast_lio: ROS_DISTRO resolved to '${FASTLIO_ROS_DISTRO}' (rosidl linkage)\")\n"
     + MARKER_END

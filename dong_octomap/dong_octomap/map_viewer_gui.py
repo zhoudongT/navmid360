@@ -560,6 +560,8 @@ class MapViewerRosNode(Node):
 
 class MapViewerWindow(QWidget):
     _ROBOT_DISPLAY_Z_OFFSET = -0.3
+    # 与 octo_planner path_z_offset_m 一致，GUI 起终点/路径与雷达高度点云对齐
+    _PATH_DISPLAY_Z_OFFSET = 0.45
     _LAYER_STYLE = {
         "occupied": ((0.95, 0.45, 0.15), 1.0, "占据"),
         "preblocked": ((0.15, 0.35, 1.0), 1.0, "禁行"),
@@ -1052,7 +1054,7 @@ class MapViewerWindow(QWidget):
             return
         self._ros_node.publish_start_navigation(True)
         self.info_label.setText(
-            f"已发送开始导航（{self._last_path_point_count} 个路径点），d1_controller 将跟踪 /planned_path。"
+            f"已发送开始导航（{self._last_path_point_count} 个路径点），Nav2 MPPI 将跟踪 /planned_path。"
         )
 
     def _on_stop_navigation_clicked(self) -> None:
@@ -1821,13 +1823,20 @@ class MapViewerWindow(QWidget):
         intensity = np.asarray([risk[cell] for cell in cells], dtype=np.float32)
         self._layer_data["risk"] = (points, np.asarray(scale, dtype=np.float32), intensity)
 
+    def _display_xyz(self, xyz: tuple[float, float, float]) -> tuple[float, float, float]:
+        return (
+            float(xyz[0]),
+            float(xyz[1]),
+            float(xyz[2]) + self._PATH_DISPLAY_Z_OFFSET,
+        )
+
     def _update_point_actor(self, kind: str, xyz: tuple[float, float, float]) -> None:
         old_actor = self._start_actor if kind == "start" else self._goal_actor
         if old_actor is not None:
             self._renderer.RemoveActor(old_actor)
 
         sphere = vtk.vtkSphereSource()
-        sphere.SetCenter(*xyz)
+        sphere.SetCenter(*self._display_xyz(xyz))
         sphere.SetRadius(0.16)
         sphere.SetThetaResolution(18)
         sphere.SetPhiResolution(18)
@@ -1863,7 +1872,8 @@ class MapViewerWindow(QWidget):
         transform.PostMultiply()
         transform.Scale(0.90, 0.90, 0.90)
         transform.RotateZ(float(np.degrees(yaw)))
-        transform.Translate(float(xyz[0]), float(xyz[1]), float(xyz[2]))
+        dx, dy, dz = self._display_xyz(xyz)
+        transform.Translate(dx, dy, dz)
 
         transform_filter = vtk.vtkTransformPolyDataFilter()
         transform_filter.SetTransform(transform)
@@ -1895,7 +1905,8 @@ class MapViewerWindow(QWidget):
         transform.PostMultiply()
         transform.Scale(0.90, 0.90, 0.90)
         transform.RotateZ(float(np.degrees(yaw)))
-        transform.Translate(float(xyz[0]), float(xyz[1]), float(xyz[2]))
+        dx, dy, dz = self._display_xyz(xyz)
+        transform.Translate(dx, dy, dz)
 
         transform_filter = vtk.vtkTransformPolyDataFilter()
         transform_filter.SetTransform(transform)

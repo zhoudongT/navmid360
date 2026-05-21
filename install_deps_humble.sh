@@ -111,8 +111,12 @@ sudo apt-get install -y \
   ros-${ROS_DISTRO}-launch-ros \
   ros-${ROS_DISTRO}-nav-msgs \
   ros-${ROS_DISTRO}-nav2-bringup \
+  ros-${ROS_DISTRO}-nav2-controller \
+  ros-${ROS_DISTRO}-nav2-costmap-2d \
   ros-${ROS_DISTRO}-nav2-lifecycle-manager \
   ros-${ROS_DISTRO}-nav2-map-server \
+  ros-${ROS_DISTRO}-nav2-mppi-controller \
+  ros-${ROS_DISTRO}-nav2-msgs \
   ros-${ROS_DISTRO}-octomap \
   ros-${ROS_DISTRO}-octomap-msgs \
   ros-${ROS_DISTRO}-octomap-ros \

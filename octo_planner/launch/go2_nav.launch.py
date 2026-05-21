@@ -1,4 +1,6 @@
-"""Go2 完整导航栈：OctoMap 规划 + 路径跟踪 + 网页 +（可选）Qt 地图管理器。
+"""Go2 全局规划栈：OctoMap 规划 + 网页 +（可选）Qt 地图管理器。
+
+局部跟踪与避障由 go2_nav_stack（Nav2 MPPI FollowPath）提供，勿在本 launch 启动 d1_controller。
 
 定位需单独启动（map/odom/base_link）::
 
@@ -29,12 +31,6 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
-def load_d1_controller_params(config_path: str) -> dict:
-    with open(config_path, "r", encoding="utf-8") as f:
-        config = yaml.safe_load(f) or {}
-    return dict(config.get("d1_controller", {}).get("ros__parameters", {}))
-
-
 def load_nav_file_config(config_path: str) -> tuple[str, str]:
     with open(config_path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f) or {}
@@ -52,8 +48,6 @@ def generate_launch_description():
     dong_octomap_share = get_package_share_directory("dong_octomap")
     nav_params_config = os.path.join(octo_planner_share, "config", "nav_params_go2.yaml")
     _, default_map_package_dir = load_nav_file_config(nav_params_config)
-    d1_controller_params = load_d1_controller_params(nav_params_config)
-
     launch_localization_arg = DeclareLaunchArgument(
         "launch_localization",
         default_value="false",
@@ -74,7 +68,6 @@ def generate_launch_description():
         description="启动 map_viewer_gui + map_save_gui（Qt 地图管理/导航）",
     )
     launch_planner_arg = DeclareLaunchArgument("launch_planner", default_value="true")
-    launch_controller_arg = DeclareLaunchArgument("launch_controller", default_value="true")
     launch_web_arg = DeclareLaunchArgument("launch_web", default_value="true")
     launch_rosbridge_arg = DeclareLaunchArgument("launch_rosbridge", default_value="true")
     web_http_port_arg = DeclareLaunchArgument("web_http_port", default_value="8080")
@@ -108,9 +101,12 @@ def generate_launch_description():
         "snap_search_radius_cells": 13,
         "require_ground_support": True,
         "strict_direct_ground_support": False,
+        "lowest_traversable_only": False,
         "enable_preblocked_costmap": True,
         "preblocked_costmap_radius_cells": 3,
         "preblocked_costmap_weight": 2.5,
+        # Mid-360 顶装约 45cm：路径 z 上移与实时点云对齐（TF 仍用 tf_manager 0.15m）
+        "path_z_offset_m": 0.45,
     }
 
     planner_node = Node(
@@ -120,30 +116,6 @@ def generate_launch_description():
         output="screen",
         condition=IfCondition(LaunchConfiguration("launch_planner")),
         parameters=[planner_params],
-    )
-
-    controller_node = Node(
-        package="octo_planner",
-        executable="d1_controller",
-        name="d1_controller",
-        output="screen",
-        condition=IfCondition(LaunchConfiguration("launch_controller")),
-        parameters=[
-            d1_controller_params,
-            {
-                "path_topic": "/planned_path",
-                "start_navigation_topic": "/start_navigation",
-                "stop_navigation_topic": "/stop_navigation",
-                "require_start_command": True,
-                "cmd_vel_topic": "/cmd_vel",
-                "manual_cmd_vel_topic": "/web_cmd_vel",
-                "tracking_point_marker_topic": "/tracking_point_marker",
-                "map_frame": "map",
-                "base_frame": "base_link",
-                "base_frame_candidates": "base_link,body,base_footprint",
-                "robot_type": "go2",
-            },
-        ],
     )
 
     map_package_manager_node = Node(
@@ -217,7 +189,6 @@ def generate_launch_description():
             map_package_arg,
             launch_map_gui_arg,
             launch_planner_arg,
-            launch_controller_arg,
             launch_web_arg,
             launch_rosbridge_arg,
             web_http_port_arg,
@@ -225,7 +196,6 @@ def generate_launch_description():
             map_package_manager_node,
             occupied_marker_node,
             planner_node,
-            controller_node,
             map_viewer_gui_node,
             map_save_gui_node,
             web_http_server,

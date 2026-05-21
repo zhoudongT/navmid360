@@ -1,0 +1,19 @@
+mppi_path_follower:
+  ros__parameters:
+    follow_path_action: /follow_path
+    require_start_command: true
+    preserve_global_path_yaw: true
+    # 关闭平滑，避免把你给的朝向抹平；中间点用前视方向，终点保留 GUI 目标 yaw
+    smooth_path_yaw: false
+    yaw_smooth_window: 3
+    yaw_lookahead_m: 0.7
+    downsample_min_spacing_m: 0.15
+    retry_on_abort: true
+    # MPPI Optimizer fail（采样轨迹全碰撞）时后退+旋转脱困，再重试 FollowPath
+    enable_escape_recovery: true
+    max_recovery_attempts: 4
+    backup_speed: 0.2
+    backup_duration_sec: 1.0
+    rotate_speed: 0.55
+    rotate_duration_sec: 1.2
+    recovery_pause_sec: 0.4

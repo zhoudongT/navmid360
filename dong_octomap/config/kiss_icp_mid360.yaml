@@ -1,0 +1,15 @@
+# KISS-ICP @ Mid-360（室内 / Livox 转 PointCloud2）
+# launch 可覆盖 ROS 帧与 topic；算法参数见 kiss_icp_mid360.yaml
+
+kiss_icp_node:
+  ros__parameters:
+    data:
+      deskew: false
+      max_range: 50.0
+      min_range: 0.5
+    mapping:
+      voxel_size: 0.25
+      max_points_per_voxel: 20
+    adaptive_threshold:
+      initial_threshold: 2.0
+      min_motion_th: 0.1

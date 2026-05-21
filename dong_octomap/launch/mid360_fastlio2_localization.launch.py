@@ -1,6 +1,6 @@
 """Mid-360 + Fast-LIO2-Localization **导航定位**（先验 PCD + ICP + FAST-LIO）。
 
-默认加载 ``/home/allen/maps/scans.pcd``；可覆盖 ``prior_pcd_path``。
+默认加载 ``/home/allen/maps/scans_0.5m.pcd``；可覆盖 ``prior_pcd_path``。
 建图请用 ``mid360_fastlio2_mapping.launch.py`` 或设 ``locate_in_prior_map:=false``。
 
 用法::
@@ -56,7 +56,7 @@ def generate_launch_description():
 
     prior_arg = DeclareLaunchArgument(
         "prior_pcd_path",
-        default_value="/home/allen/maps/scans.pcd",
+        default_value="/home/allen/maps/scans_0.5m.pcd",
         description="先验 PCD（导航定位必填）",
     )
     locate_arg = DeclareLaunchArgument(

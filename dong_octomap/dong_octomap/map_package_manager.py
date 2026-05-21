@@ -132,7 +132,8 @@ class MapPackageManager(Node):
             self._handle_load_package,
             callback_group=callback_group,
         )
-        self._autoload_timer = self.create_timer(1.0, self._autoload_package_once)
+        # 尽快加载，避免网页长时间显示「尚未加载栅格」
+        self._autoload_timer = self.create_timer(0.3, self._autoload_package_once)
 
         self.get_logger().info(
             "map_package_manager started. save_service=~/save_package load_service=~/load_package"

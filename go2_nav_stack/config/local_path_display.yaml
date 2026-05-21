@@ -1,0 +1,8 @@
+local_path_display:
+  ros__parameters:
+    input_topic: /controller_server/transformed_global_plan
+    output_topic: /local_path
+    global_path_topic: /planned_path
+    fallback_near_robot_m: 2.5
+    target_frame: map
+    tf_timeout_sec: 0.2

@@ -1,5 +1,6 @@
 # Go2 + Mid-360 顶装 + FAST-LIO2 重定位导航（map/odom/base_link 由定位 launch 发布）
 # 请按本机路径修改 map_package_dir / relocalization_* 文件
+# 全局路径 z 补偿在 go2_nav.launch.py 的 path_z_offset_m（默认 0.45，与雷达高度一致）
 
 relocalization_bin_file: /home/allen/maps/relocalization.bin
 relocalization_pcd_file: /home/allen/maps/scans_0.5m.pcd
@@ -17,20 +18,32 @@ d1_controller:
     robot_center_offset_y: 0.0
     robot_center_offset_z: 0.0
     tracking_point_reached_xy_tolerance: 0.35
+    # 前视距离：只跟踪前方该距离处的路径点，不逐点走完所有路径点
+    lookahead_distance: 1.2
+    # 与 /planned_path、/goal_pose 同为 map；map->odom 重定位后已锁定静态，不再用 odom 跟踪
+    path_tracking_frame: map
     tracking_point_marker_scale: 0.28
     enable_tracking_debug_view: true
     tracking_debug_view_size_px: 640
     tracking_debug_view_pixels_per_meter: 80.0
     tracking_debug_view_frequency: 10.0
+    # TEB/DWA 差速：vx + yaw(wz)，横向误差只进角速度，无 vy
+    use_unicycle_control: true
     linear_gain: 0.9
     lateral_gain: 0.7
-    heading_gain: 1.0
-    cross_track_angular_gain: 0.6
-    final_yaw_gain: 0.4
-    enable_lateral_motion: true
+    use_path_tangent_heading: true
+    heading_gain: 0.85
+    cross_track_angular_gain: 0.5
+    pure_pursuit_gain: 0.4
+    min_tracking_linear_speed: 0.25
+    turn_coupling_factor: 0.15
+    final_yaw_gain: 0.35
+    enable_lateral_motion: false
     max_linear_speed: 0.45
+    min_linear_speed: 0.0
     max_lateral_speed: 0.30
-    max_angular_speed: 0.85
+    max_angular_speed: 0.35
+    # 终点对齐网页 /goal_pose 箭头朝向
     align_final_yaw: true
     linear_deadband: 0.04
     lateral_deadband: 0.04
@@ -38,3 +51,5 @@ d1_controller:
     goal_position_tolerance: 0.12
     goal_yaw_tolerance: 0.15
     tf_lookup_timeout_sec: 0.15
+    enable_tracking_diagnostic_log: true
+    tracking_diagnostic_log_period_sec: 1.0

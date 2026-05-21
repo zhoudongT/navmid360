@@ -109,6 +109,51 @@ bash scripts/sync_fastlio2_localization.sh
 
 仅编译本仓库三个 ROS 2 包时，可不克隆上述仓库；整机导航需在同一工作区编译 **FAST_LIO_ROS2**（默认 `mid360.yaml`）及 **livox_ros_driver2**（Mid-360 驱动，随多数 FAST-LIO 分支依赖），并与 `unitree_ros2` 衔接 `/cmd_vel` 与 TF。`nav.launch.py` 已不再依赖原智元 `d1_bringup` / `d1_core`。
 
+### Go2 实车推荐栈（KISS-ICP + Scan Context，pitch=18.5°）
+
+工程方案见 **[FAST-LIO2_ScanContext_Quadruped_SingleMap_Humble.md](./FAST-LIO2_ScanContext_Quadruped_SingleMap_Humble.md)**（**单张**全局 PCD + OctoMap，不切 map、**无需楼梯/楼层配置**）。本仓库 **`go2_nav_stack`**：
+
+| 模块 | 实现 |
+|------|------|
+| 驱动 + 里程计 | Livox + **KISS-ICP**（`mid360_kiss_icp_localization`） |
+| 单地图 | `single_map_manager` + `maps/scans_0.5m.pcd` |
+| 全局重定位 | **Scan Context** + **ICP** |
+| TF | `tf_manager_node`（`map→odom` + `odom→base`） |
+| 全局路径 | 网页规划 → `/planned_path` → `d1_controller` 跟点 |
+| **实时避障** | `global_obstacle_avoidance_node`（0.3–1.0m 减速，0.1–0.3m 绕障） |
+| 速度输出 | `d1_controller` → `/cmd_vel_raw` → 避障 → `/cmd_vel` |
+
+**一键启动：**
+
+```bash
+source install/setup.bash
+colcon build --packages-select go2_nav_stack kiss_icp icp_relocalization dong_octomap octo_planner
+
+ros2 launch go2_nav_stack go2_full_stack.launch.py \
+  map_package_dir:=/home/allen/maps/window_filtered_all \
+  prior_pcd_path:=/home/allen/maps/scans_0.5m.pcd
+```
+
+**两终端拆分：**
+
+```bash
+# 终端 A：bringup（文档 §26）
+ros2 launch go2_nav_stack bringup_humble.launch.py prior_pcd_path:=/home/allen/maps/scans_0.5m.pcd
+
+# 终端 B：规划 + 网页
+ros2 launch go2_nav_stack navigation_humble.launch.py map_package_dir:=/home/allen/maps/window_filtered_all
+```
+
+避障参数：`go2_nav_stack/config/global_obstacle_avoidance.yaml`
+
+生成 Scan Context 库：
+
+```bash
+ros2 run go2_nav_stack build_scan_context_db --pcd /home/allen/maps/scans_0.5m.pcd --x 0 --y 0 --yaw 0
+```
+
+开机约 10s 后自动 Scan Context 查询；RViz **2D Pose Estimate** 仍可手动精调。Livox 默认配置：**`MID360_go2_tilt18_config.json`（pitch=18.5°）**。
+
 ## 安装依赖
 
 可以使用仓库内脚本安装常用依赖：

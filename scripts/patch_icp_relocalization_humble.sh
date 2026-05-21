@@ -71,4 +71,13 @@ if grep -q 'sac_ia_gicp' "${ICP_CMAKE}"; then
   echo "已跳过 sac_ia_gicp 目标（上游 example 未使用）。"
 fi
 
+if ! grep -q 'libusb-1.0' "${ICP_CMAKE}"; then
+  sed -i '/^add_executable(icp_node/a\
+find_library(LIBUSB_1 NAMES usb-1.0 PATHS /lib/x86_64-linux-gnu /usr/lib/x86_64-linux-gnu REQUIRED)' "${ICP_CMAKE}"
+  sed -i 's|target_link_libraries(icp_node ${PCL_LIBRARIES})|target_link_libraries(icp_node ${PCL_LIBRARIES} ${LIBUSB_1})|' "${ICP_CMAKE}"
+  echo "已显式链接 libusb-1.0（缓解 MVS 旧 libusb 与 libpcl_io 冲突）。"
+fi
+
 echo "当前 ${ICP_CMAKE} 已按 Humble 维护。编译: bash scripts/build_icp_relocalization_humble.sh"
+echo "若 icp_node 仍报 libusb_set_option：launch 已 prepend /lib/x86_64-linux-gnu，或临时:"
+echo "  export LD_LIBRARY_PATH=/lib/x86_64-linux-gnu:\$LD_LIBRARY_PATH"

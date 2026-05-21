@@ -147,6 +147,8 @@ install(TARGETS ${_dong_octomap_cpp_targets}
 )
 
 install(PROGRAMS
+  scripts/livox_custommsg_to_pointcloud2.py
+  scripts/kiss_icp_reset_on_icp.py
   scripts/open3d_octomap_viewer.py
   scripts/pcd_file_publisher.py
   scripts/no_cache_http_server.py

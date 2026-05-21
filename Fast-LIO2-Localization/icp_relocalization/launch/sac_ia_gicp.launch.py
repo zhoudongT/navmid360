@@ -16,7 +16,7 @@ def generate_launch_description():
         executable='sac_ia_gicp',
         name='sac_ia_gicp_node',
         parameters=[
-            {'target_pcd_file': "/home/allen/maps/scans.pcd"},
+            {'target_pcd_file': "/home/allen/maps/scans_0.5m.pcd"},
             {'num_threads': 8},
             {'k_serach_source': 100},
             {'k_serach_target': 100},

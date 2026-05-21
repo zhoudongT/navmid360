@@ -2,7 +2,7 @@
 # 启动 fast_lio relocalization.launch.py，并规避海康 MVS 旧 libusb 导致 PCL 崩溃。
 #
 # 用法:
-#   bash scripts/run_fastlio_relocalization.sh prior_pcd_path:=/path/to/map.pcd
+#   bash scripts/run_fastlio_relocalization.sh prior_pcd_path:=/home/allen/maps/scans_0.5m.pcd
 #
 set -euo pipefail
 

@@ -1,0 +1,7 @@
+single_map_manager:
+  ros__parameters:
+    maps_root: /home/allen/maps
+    global_map_pcd: scans_0.5m.pcd
+    scan_context_db: scan_context_db.json
+    octomap_package: window_filtered_all
+    submap_radius: 15.0

@@ -45,3 +45,4 @@ Thumbs.db
 # Local environment files
 .env
 *.local
+KISS-ICP/

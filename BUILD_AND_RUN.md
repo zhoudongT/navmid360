@@ -109,24 +109,19 @@ source install/setup.bash
 
 运行前请按 README 配置 `octo_planner/config/nav_params.yaml`（如 `relocalization_bin_file`、`map_package_dir` 等）。
 
-### 3.4 Gazebo 仿真（Mid-360 + IMU + FAST-LIO）
+### 3.4 Go2 实车导航栈（KISS-ICP + Scan Context，推荐）
+
+设计说明见仓库根目录 **`FAST-LIO2_ScanContext_Quadruped_MultiFloor_Navigation.md`**。里程计使用 **KISS-ICP**（替代 FAST-LIO2），Mid-360 默认 **pitch=18.5°**（`MID360_go2_tilt18_config.json`）。
 
 | 说明 | 命令 |
 |------|------|
-| 一键同步插件 + 编译 + 启动建图仿真 | `bash scripts/run_mid360_sim_slam.sh` |
-| 仅下载仿真插件 | `bash scripts/sync_mid360_gazebo_sim.sh` |
-| 仅编译仿真包 | `bash scripts/build_gazebo_sim.sh` |
-| 仅 Gazebo + 雷达/IMU | `ros2 launch dong_gazebo_sim gazebo_mid360_bringup.launch.py` |
-| Gazebo + FAST-LIO 建图 | `ros2 launch dong_gazebo_sim mid360_sim_slam.launch.py` |
-| 仿真 + Web 导航（需地图包） | `ros2 launch dong_gazebo_sim mid360_sim_web_nav.launch.py map_package:=/path/to/map` |
+| 编译导航栈 | `colcon build --packages-select go2_nav_stack kiss_icp icp_relocalization dong_octomap octo_planner --symlink-install` |
+| 仅定位 + TF + 重定位 | `ros2 launch go2_nav_stack go2_bringup.launch.py prior_pcd_path:=/home/allen/maps/scans_0.5m.pcd` |
+| 定位 + OctoMap 网页导航（一键） | `ros2 launch go2_nav_stack go2_full_stack.launch.py map_package_dir:=/home/allen/maps/window_filtered_all` |
+| 生成 Scan Context 数据库 | `ros2 run go2_nav_stack build_scan_context_db --pcd /home/allen/maps/scans_0.5m.pcd --x 0 --y 0 --yaw 0` |
+| 手动触发重定位 | `ros2 service call /relocalization_manager/relocalize std_srvs/srv/Trigger` |
 
-仿真话题与实车一致：`/livox/lidar`（CustomMsg）、`/livox/imu`。键盘控制（另开终端）：
-
-```bash
-ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args -p use_sim_time:=true
-```
-
-依赖：`gazebo`（Classic）、`ros2_livox_simulation`（脚本自动克隆到 `src/ros2_livox_simulation`）、已编译的 `fast_lio` 与 `livox_ros_driver2`。
+浏览器：`http://127.0.0.1:8080`。速度链：`d1_controller` → `/cmd_vel_raw` → `robot_motion_bridge` → `/cmd_vel`（Go2 twist）。
 
 ### 3.5 其他 Launch（测试 / Open3D / Mid-360）
 
@@ -150,9 +145,6 @@ ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args -p use_sim_time:
 | `scripts/sync_fastlio2_and_localization.sh` |
 | `scripts/sync_fastlio2_localization.sh` |
 | `scripts/sync_fastlio_mid360_deps.sh` |
-| `scripts/sync_mid360_gazebo_sim.sh` |
-| `scripts/build_gazebo_sim.sh` |
-| `scripts/run_mid360_sim_slam.sh` |
 | `scripts/build_livox_ros_driver2.sh` |
 | `scripts/patch_fast_lio_ros2_cmake.py` |
 | `scripts/apply_fast_lio_ros2_patches.sh` |

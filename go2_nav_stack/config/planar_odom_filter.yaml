@@ -1,0 +1,8 @@
+planar_odom_filter_node:
+  ros__parameters:
+    input_topic: /kiss_odom_raw
+    output_topic: /state_estimation
+    lock_z: true
+    z_fixed: 0.0
+    planar_orientation: true
+    yaw_smooth_alpha: 0.12

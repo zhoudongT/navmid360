@@ -144,6 +144,8 @@ public:
     declare_parameter<bool>("lowest_traversable_only", false);
     declare_parameter<std::string>("map_id", "navigation_map");
     declare_parameter<std::string>("source_world_file", "");
+    // Go2 顶装雷达：路径 z 上移，与实时点云/扫描高度对齐（不改 TF）
+    declare_parameter<double>("path_z_offset_m", 0.0);
 
     const auto octomap_topic = get_parameter("octomap_topic").as_string();
     const auto start_topic = get_parameter("start_topic").as_string();
@@ -1283,6 +1285,7 @@ private:
 
   void publishPath(const std::vector<GridIndex> & cells, const std::string & frame_id)
   {
+    const double path_z_offset = get_parameter("path_z_offset_m").as_double();
     nav_msgs::msg::Path path_msg;
     path_msg.header.stamp = now();
     path_msg.header.frame_id = frame_id;
@@ -1309,17 +1312,37 @@ private:
       pose.header = path_msg.header;
       pose.pose.position.x = p.x();
       pose.pose.position.y = p.y();
-      pose.pose.position.z = p.z();
-      pose.pose.orientation.w = 1.0;
-      if (has_goal_pose_ && i + 1 == cells.size()) {
-        pose.pose.orientation = goal_pose_.pose.orientation;
+      pose.pose.position.z = p.z() + path_z_offset;
+      // 中间点：用路径段切线 yaw（便于 RViz 显示；跟踪由 d1 用切线或目标点）
+      double seg_yaw = 0.0;
+      if (i + 1 < cells.size()) {
+        const auto p_next = gridToWorld(cells[i + 1]);
+        seg_yaw = std::atan2(p_next.y() - p.y(), p_next.x() - p.x());
+      } else if (i > 0) {
+        const auto p_prev = gridToWorld(cells[i - 1]);
+        seg_yaw = std::atan2(p.y() - p_prev.y(), p.x() - p_prev.x());
+      }
+      pose.pose.orientation.z = std::sin(seg_yaw * 0.5);
+      pose.pose.orientation.w = std::cos(seg_yaw * 0.5);
+      if (i == 0) {
+        pose.pose.position.x = start_point_.point.x;
+        pose.pose.position.y = start_point_.point.y;
+        pose.pose.position.z = start_point_.point.z + path_z_offset;
+      }
+      if (i + 1 == cells.size()) {
+        pose.pose.position.x = goal_point_.point.x;
+        pose.pose.position.y = goal_point_.point.y;
+        pose.pose.position.z = goal_point_.point.z + path_z_offset;
+        if (has_goal_pose_) {
+          pose.pose.orientation = goal_pose_.pose.orientation;
+        }
       }
       path_msg.poses.push_back(pose);
 
       geometry_msgs::msg::Point q;
       q.x = p.x();
       q.y = p.y();
-      q.z = p.z();
+      q.z = p.z() + path_z_offset;
       m.points.push_back(q);
     }
 

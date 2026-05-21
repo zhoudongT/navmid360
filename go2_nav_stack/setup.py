@@ -1,0 +1,57 @@
+from setuptools import setup
+
+package_name = "go2_nav_stack"
+
+setup(
+    name=package_name,
+    version="0.3.0",
+    packages=[package_name],
+    data_files=[
+        ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
+        ("share/" + package_name, ["package.xml"]),
+        ("share/" + package_name + "/config", [
+            "config/frame_config.yaml",
+            "config/tf_manager.yaml",
+            "config/relocalization.yaml",
+            "config/single_map_manager.yaml",
+            "config/planar_odom_filter.yaml",
+            "config/map_cloud_display.yaml",
+            "config/nav2_mppi_params.yaml",
+            "config/local_costmap_display.yaml",
+            "config/local_path_display.yaml",
+            "config/local_costmap_standalone.yaml",
+            "config/nav2_controller_bringup.yaml",
+            "config/mppi_path_follower.yaml",
+        ]),
+        ("share/" + package_name + "/launch", [
+            "launch/bringup_humble.launch.py",
+            "launch/navigation_humble.launch.py",
+            "launch/go2_bringup.launch.py",
+            "launch/go2_full_stack.launch.py",
+            "launch/nav2_mppi.launch.py",
+        ]),
+    ],
+    install_requires=["setuptools", "numpy"],
+    zip_safe=True,
+    maintainer="navmid360",
+    maintainer_email="user@todo.todo",
+    description="Go2 single-map: KISS-ICP + ICP + dong_path global planner + Nav2 MPPI local",
+    license="Apache-2.0",
+    entry_points={
+        "console_scripts": [
+            "tf_manager_node = go2_nav_stack.tf_manager_node:main",
+            "planar_odom_filter_node = go2_nav_stack.planar_odom_filter_node:main",
+            "map_cloud_display_node = go2_nav_stack.map_cloud_display_node:main",
+            "scan_context_manager = go2_nav_stack.scan_context_manager:main",
+            "relocalization_manager = go2_nav_stack.relocalization_manager:main",
+            "single_map_manager = go2_nav_stack.single_map_manager:main",
+            "global_path_server = go2_nav_stack.global_path_server:main",
+            "navigation_state_machine = go2_nav_stack.navigation_state_machine:main",
+            "mppi_path_follower = go2_nav_stack.mppi_path_follower_node:main",
+            "local_costmap_display = go2_nav_stack.local_costmap_display_node:main",
+            "local_path_display = go2_nav_stack.local_path_display_node:main",
+            "nav2_controller_bringup = go2_nav_stack.nav2_controller_bringup_node:main",
+            "build_scan_context_db = go2_nav_stack.build_scan_context_db:main",
+        ],
+    },
+)

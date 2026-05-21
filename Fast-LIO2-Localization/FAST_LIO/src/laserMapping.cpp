@@ -99,6 +99,12 @@ double gyr_cov = 0.1, acc_cov = 0.1, b_gyr_cov = 0.0001, b_acc_cov = 0.0001;
 double filter_size_corner_min = 0, filter_size_surf_min = 0, filter_size_map_min = 0, fov_deg = 0;
 double cube_len = 0, HALF_FOV_COS = 0, FOV_DEG = 0, total_distance = 0, lidar_end_time = 0, first_lidar_time = 0.0;
 int effct_feat_num = 0, time_log_counter = 0, scan_count = 0, publish_count = 0;
+bool prior_map_freeze_odom_without_features = true;
+int prior_map_min_effective_points = 15;
+bool prior_map_has_good_lidar_fix = false;
+state_ikfom last_good_state_point;
+int last_frame_effct_feat_num = 0;
+bool prior_map_probe_frame = false;
 int iterCount = 0, feats_down_size = 0, NUM_MAX_ITERATIONS = 0, laserCloudValidNum = 0, pcd_save_interval = -1, pcd_index = 0;
 bool point_selected_surf[100000] = {0};
 bool lidar_pushed, flg_first_scan = true, flg_exit = false, flg_EKF_inited;
@@ -250,8 +256,10 @@ void h_share_model(state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_
     if (effct_feat_num < 1)
     {
         ekfom_data.valid = false;
-        std::cerr << "No Effective Points!" << std::endl;
-        // ROS_WARN("No Effective Points! \n");
+        if (!(locate_in_prior_map && prior_map_freeze_odom_without_features && prior_map_has_good_lidar_fix))
+        {
+            std::cerr << "No Effective Points!" << std::endl;
+        }
         return;
     }
 
@@ -343,7 +351,9 @@ public:
         this->declare_parameter<vector<double>>("mapping.extrinsic_R", vector<double>());
         this->declare_parameter<bool>("locate_in_prior_map", false);
         this->declare_parameter<bool>("prior_map_skip_load_downsample", false);
-        this->declare_parameter<double>("prior_map_match_dist_sq", 15.0);
+        this->declare_parameter<double>("prior_map_match_dist_sq", 49.0);
+        this->declare_parameter<bool>("prior_map_freeze_odom_without_features", true);
+        this->declare_parameter<int>("prior_map_min_effective_points", 15);
         this->declare_parameter<string>("prior_map_path", "");
 
         this->get_parameter_or<bool>("publish.path_en", path_en, true);
@@ -388,7 +398,11 @@ public:
         this->get_parameter_or<vector<double>>("mapping.extrinsic_R", extrinR, vector<double>());
         this->get_parameter_or<bool>("locate_in_prior_map", locate_in_prior_map, false);
         this->get_parameter_or<bool>("prior_map_skip_load_downsample", prior_map_skip_load_downsample, false);
-        this->get_parameter_or<double>("prior_map_match_dist_sq", prior_map_match_dist_sq, 15.0);
+        this->get_parameter_or<double>("prior_map_match_dist_sq", prior_map_match_dist_sq, 49.0);
+        this->get_parameter_or<bool>(
+            "prior_map_freeze_odom_without_features", prior_map_freeze_odom_without_features, true);
+        this->get_parameter_or<int>(
+            "prior_map_min_effective_points", prior_map_min_effective_points, 15);
         this->get_parameter_or<string>("prior_map_path", prior_map_path, "");
 
         RCLCPP_INFO(this->get_logger(), "p_pre->lidar_type %d", p_pre->lidar_type);
@@ -555,6 +569,31 @@ private:
         return false;
     }
 
+    void sync_state_from_ikfom(const state_ikfom & x)
+    {
+        state_point = x;
+        euler_cur = SO3ToEuler(state_point.rot);
+        pos_lid = state_point.pos + state_point.rot * state_point.offset_T_L_I;
+        geoQuat.x = state_point.rot.coeffs()[0];
+        geoQuat.y = state_point.rot.coeffs()[1];
+        geoQuat.z = state_point.rot.coeffs()[2];
+        geoQuat.w = state_point.rot.coeffs()[3];
+    }
+
+    void lock_lio_state_at_odom_origin()
+    {
+        state_ikfom x = kf.get_x();
+        x.pos.setZero();
+        x.vel.setZero();
+        x.rot = SO3(M3D::Identity());
+        kf.change_x(x);
+        last_good_state_point = x;
+        sync_state_from_ikfom(x);
+        last_frame_effct_feat_num = 0;
+        prior_map_has_good_lidar_fix = true;
+        prior_map_probe_frame = true;
+    }
+
     void rebuild_prior_map_ikdtree()
     {
         if (feats_down_prior_map_orig->empty())
@@ -577,9 +616,10 @@ private:
         pcl::transformPointCloud(*feats_down_prior_map, *feats_down_prior_map, T);
         ikdtree.Build(feats_down_prior_map->points);
         prior_ikdtree_built = true;
+        lock_lio_state_at_odom_origin();
         RCLCPP_INFO(this->get_logger(),
-            "Prior map ikd-tree rebuilt (%zu points, %.2f s)",
-            feats_down_prior_map->size(), omp_get_wtime() - t0);
+            "Prior map ikd-tree rebuilt (%zu points, %.2f s). LIO locked at odom origin until >= %d effective points.",
+            feats_down_prior_map->size(), omp_get_wtime() - t0, prior_map_min_effective_points);
     }
 
     inline void dump_lio_state_to_log(FILE *fp)
@@ -1167,8 +1207,23 @@ private:
             solve_const_H_time = 0;
             svd_time = 0;
             t0 = omp_get_wtime();
+            const bool hold_odom_frozen = locate_in_prior_map && prior_map_freeze_odom_without_features &&
+                prior_map_has_good_lidar_fix && !prior_map_probe_frame;
+            if (hold_odom_frozen)
+            {
+                kf.change_x(last_good_state_point);
+            }
             p_imu->Process(Measures, kf, feats_undistort);
-            state_point = kf.get_x();
+            if (hold_odom_frozen)
+            {
+                kf.change_x(last_good_state_point);
+                sync_state_from_ikfom(last_good_state_point);
+            }
+            else
+            {
+                state_point = kf.get_x();
+                sync_state_from_ikfom(state_point);
+            }
             pos_lid = state_point.pos + state_point.rot * state_point.offset_T_L_I;
             // RCLCPP_INFO(this->get_logger(),"pos_lid: %f %f %f", pos_lid(0), pos_lid(1), pos_lid(2));
 
@@ -1258,19 +1313,48 @@ private:
             /*** iterated state estimation ***/
             double t_update_start = omp_get_wtime();
             double solve_H_time = 0;
-            kf.update_iterated_dyn_share_modified(LASER_POINT_COV, solve_H_time);
-            state_point = kf.get_x();
-            euler_cur = SO3ToEuler(state_point.rot);
-            pos_lid = state_point.pos + state_point.rot * state_point.offset_T_L_I;
-            geoQuat.x = state_point.rot.coeffs()[0];
-            geoQuat.y = state_point.rot.coeffs()[1];
-            geoQuat.z = state_point.rot.coeffs()[2];
-            geoQuat.w = state_point.rot.coeffs()[3];
+            // ICP 锁定后 hold_odom_frozen 为真：始终跳过 EKF，避免 15~20 个弱有效点仍推动位姿
+            const bool skip_ekf_for_freeze = hold_odom_frozen;
+            if (prior_map_probe_frame)
+            {
+                prior_map_probe_frame = false;
+            }
+            if (skip_ekf_for_freeze)
+            {
+                kf.change_x(last_good_state_point);
+                sync_state_from_ikfom(last_good_state_point);
+            }
+            else
+            {
+                kf.update_iterated_dyn_share_modified(LASER_POINT_COV, solve_H_time);
+                state_point = kf.get_x();
+                sync_state_from_ikfom(state_point);
+                if (locate_in_prior_map && prior_map_freeze_odom_without_features &&
+                    effct_feat_num >= prior_map_min_effective_points)
+                {
+                    last_good_state_point = state_point;
+                    prior_map_has_good_lidar_fix = true;
+                }
+            }
+
+            if (hold_odom_frozen)
+            {
+                RCLCPP_WARN_THROTTLE(
+                    this->get_logger(), *this->get_clock(), 2000,
+                    "Prior map: ICP locked, skip EKF + static odom TF (eff=%d, need>=%d to refine).",
+                    effct_feat_num, prior_map_min_effective_points);
+            }
+            last_frame_effct_feat_num = effct_feat_num;
 
             double t_update_end = omp_get_wtime();
 
             /******* Publish odometry *******/
-            publish_odometry(pubOdomAftMapped_);
+            const bool publish_dynamic_odom_tf =
+                !locate_in_prior_map || !prior_map_has_good_lidar_fix || !hold_odom_frozen;
+            if (publish_dynamic_odom_tf)
+            {
+                publish_odometry(pubOdomAftMapped_);
+            }
 
             /*** add the feature points to map kdtree ***/
             t3 = omp_get_wtime();
@@ -1354,6 +1438,12 @@ private:
         initial_pose = *msg;
         initial_pose_received = true;
         prior_map_rebuild_pending = true;
+        if (!prior_ikdtree_built)
+        {
+            prior_map_has_good_lidar_fix = false;
+            last_frame_effct_feat_num = 0;
+        }
+        prior_map_probe_frame = false;
         Localmap_Initialized = false;
         RCLCPP_INFO(this->get_logger(),
             "Initial pose received, will rebuild prior ikd-tree (%.2f, %.2f, %.2f)",

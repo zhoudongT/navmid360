@@ -1,0 +1,30 @@
+# ICP 先验图对齐（icp_node）— 与 scans_0.5m.pcd 配套
+# Go2：Livox JSON extrinsic（MID360_go2_tilt18_config.json）已补偿安装角，不再做 IMU 动态拉平
+
+icp_node:
+  ros__parameters:
+    gravity_align_enable: false
+    imu_topic: "/livox/imu"
+    icp_planar_constraint: true
+    scan_azimuth_offset_deg: 0.0
+    icp_crop_min_z: -0.8
+    icp_crop_max_z: 3.0
+    icp_max_horizontal_range: 60.0
+    icp_coarse_yaw_search_enable: true
+    icp_coarse_yaw_half_range_deg: 30.0
+    icp_coarse_yaw_step_deg: 3.0
+    # map->odom 仅由 Scan Context+配准 后 /relocalization/pose -> tf_manager 发布，运动时不再改
+    publish_map_to_odom_tf: false
+    continuous_tracking: false
+    use_ndt_prefit: true
+    ndt_resolution: 1.0
+    ndt_step_size: 0.1
+    ndt_max_iter: 35
+    odom_frame_id: "odom"
+    fitness_score_thre: 0.08
+    converged_count_thre: 12
+    max_correspondence_distance: 0.3
+    map_voxel_leaf_size: 0.5
+    cloud_voxel_leaf_size: 0.2
+    solver_max_iter: 75
+    RANSAC_outlier_rejection_threshold: 1.0

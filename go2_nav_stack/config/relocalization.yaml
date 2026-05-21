@@ -1,0 +1,24 @@
+scan_context_manager:
+  ros__parameters:
+    maps_root: /home/allen/maps
+    scan_context_db: scan_context_db.json
+    search_scope: whole_building
+    top_k: 10
+    max_ring_distance: 0.35
+    min_similarity_score: 0.15
+
+relocalization_manager:
+  ros__parameters:
+    # 一键启动默认：不自动 Scan Context，仅在 Qt「当前姿态」点击后发 /initialpose 走 ICP
+    auto_reloc_on_start: false
+    accept_manual_initialpose: true
+    startup_delay_sec: 10.0
+    reloc_on_tf_lost_when_navigating: false
+    tf_lost_reloc_cooldown_sec: 30.0
+
+single_map_manager:
+  ros__parameters:
+    maps_root: /home/allen/maps
+    global_map_pcd: scans_0.5m.pcd
+    scan_context_db: scan_context_db.json
+    octomap_package: window_filtered_all

@@ -48,7 +48,7 @@ def generate_launch_description():
     fast_lio_node = Node(
         package='fast_lio',
         executable='fastlio_mapping',
-        parameters=[fast_lio_config],
+        parameters=[fast_lio_config, {'use_sim_time': use_sim_time}],
         output='screen',
         remappings=[('/Odometry', '/state_estimation')],
     )
@@ -56,6 +56,7 @@ def generate_launch_description():
         package='rviz2',
         executable='rviz2',
         arguments=['-d', rviz_cfg],
+        parameters=[{'use_sim_time': use_sim_time}],
         condition=IfCondition(rviz_use),
     )
 
@@ -67,5 +68,6 @@ def generate_launch_description():
     ld.add_action(declare_rviz_config_path_cmd)
 
     ld.add_action(fast_lio_node)
+    ld.add_action(rviz_node)
 
     return ld

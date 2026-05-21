@@ -1,0 +1,12 @@
+nav2_controller_bringup:
+  ros__parameters:
+    # nav2_costmap_2d 可执行文件内 lifecycle 节点名固定为 costmap（与 launch 的 name 无关）
+    costmap_node: costmap/costmap
+    controller_node: controller_server
+    startup_delay_sec: 3.0
+    node_wait_timeout_sec: 45.0
+    costmap_configure_timeout_sec: 60.0
+    costmap_activate_timeout_sec: 30.0
+    configure_timeout_sec: 180.0
+    activate_timeout_sec: 90.0
+    retry_period_sec: 30.0

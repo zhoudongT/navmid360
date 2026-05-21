@@ -7,6 +7,9 @@
 
     ros2 launch dong_octomap mid360_livox_driver.launch.py
     ros2 launch dong_octomap mid360_livox_driver.launch.py livox_user_config_path:=/你的/MID360_config.json
+
+注意: ``MID360_config.json`` 里若 ``extrinsic_parameter.pitch`` 为 18.5，实时点云相对
+建图点云会在水平面内偏约 18.5°。建图与定位须用同一 JSON（默认 ``MID360_go2_up_config.json``，pitch=0）。
 """
 
 import os
@@ -28,17 +31,18 @@ def generate_launch_description():
         ) from exc
 
     dong_octomap_share = get_package_share_directory("dong_octomap")
-    go2_cfg = os.path.join(dong_octomap_share, "config", "MID360_go2_up_config.json")
-    default_cfg = go2_cfg if os.path.isfile(go2_cfg) else os.path.join(
-        livox_share, "config", "MID360_config.json"
-    )
+    go2_cfg = os.path.join(dong_octomap_share, "config", "MID360_go2_tilt18_config.json")
+    go2_up_cfg = os.path.join(dong_octomap_share, "config", "MID360_go2_up_config.json")
+    default_cfg = go2_cfg if os.path.isfile(go2_cfg) else go2_up_cfg
+    if not os.path.isfile(default_cfg):
+        default_cfg = os.path.join(livox_share, "config", "MID360_config.json")
     if not os.path.isfile(default_cfg):
         raise RuntimeError(f"未找到 Mid-360 配置文件: {default_cfg}")
 
     cfg_arg = DeclareLaunchArgument(
         "livox_user_config_path",
         default_value=default_cfg,
-        description="MID360 JSON 绝对路径（默认 dong_octomap Go2 顶装配置 MID360_go2_up_config.json）",
+        description="MID360 JSON（默认 Go2 pitch=18.5° MID360_go2_tilt18_config.json）",
     )
     bd_arg = DeclareLaunchArgument(
         "livox_broadcast_code",

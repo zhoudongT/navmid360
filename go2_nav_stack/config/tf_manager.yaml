@@ -6,11 +6,22 @@ tf_manager_node:
     lidar_frame: livox_frame
     publish_rate: 50.0
     tf_timeout: 0.3
+    publish_base_to_imu: false
     publish_odom_to_base: true
     publish_map_to_odom: true
     latch_map_to_odom: true
-    seed_map_to_odom_identity: true
-    odom_topic: /state_estimation
+    seed_map_to_odom_identity: false
+    seed_odom_to_base_identity: true
+    # 直接用 FAST-LIO（有 10Hz）；不再依赖 planar_odom_filter
+    odom_topic: /lio_odom_raw
+    republish_state_estimation: true
+    state_estimation_topic: /state_estimation
+    # false：odom->base 与 LIO 的 odom->imu_link 同位姿（需 base_link->imu_link 单位阵）
+    apply_lio_to_base_extrinsic: false
+    republish_odom_to_base_on_timer: false
+    planar_yaw_only: true
+    lock_odom_z: true
+    odom_z_fixed: 0.0
     static_base_to_imu_xyz: [0.0, 0.0, 0.0]
     static_base_to_imu_rpy: [0.0, 0.0, 0.0]
     static_base_to_lidar_xyz: [0.0, 0.0, 0.15]

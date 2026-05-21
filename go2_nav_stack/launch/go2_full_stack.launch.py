@@ -29,8 +29,10 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument("launch_rviz", default_value="true"),
             DeclareLaunchArgument("launch_map_gui", default_value="true"),
+            DeclareLaunchArgument("launch_web", default_value="true"),
             DeclareLaunchArgument("launch_rosbridge", default_value="true"),
-            DeclareLaunchArgument("web_http_port", default_value="8080"),
+            DeclareLaunchArgument("web_http_port", default_value="8888"),
+            DeclareLaunchArgument("rosbridge_port", default_value="9090"),
             DeclareLaunchArgument(
                 "reloc_auto_start",
                 default_value="false",
@@ -50,8 +52,10 @@ def generate_launch_description():
                 launch_arguments={
                     "map_package_dir": LaunchConfiguration("map_package_dir"),
                     "launch_map_gui": LaunchConfiguration("launch_map_gui"),
+                    "launch_web": LaunchConfiguration("launch_web"),
                     "launch_rosbridge": LaunchConfiguration("launch_rosbridge"),
                     "web_http_port": LaunchConfiguration("web_http_port"),
+                    "rosbridge_port": LaunchConfiguration("rosbridge_port"),
                 }.items(),
             ),
         ]

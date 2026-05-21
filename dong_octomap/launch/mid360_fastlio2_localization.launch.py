@@ -78,6 +78,26 @@ def generate_launch_description():
     iy_arg = DeclareLaunchArgument("initial_y", default_value="0.0")
     iz_arg = DeclareLaunchArgument("initial_z", default_value="0.0")
     ia_arg = DeclareLaunchArgument("initial_a", default_value="0.0")
+    icp_planar_arg = DeclareLaunchArgument("icp_planar_constraint", default_value="true")
+    pub_base_arg = DeclareLaunchArgument("publish_base_tf", default_value="true")
+    send_odom_arg = DeclareLaunchArgument("send_odom_base_tf", default_value="")
+    tf_pub_arg = DeclareLaunchArgument("enable_transform_publisher", default_value="true")
+    odom_out_arg = DeclareLaunchArgument("odom_output_topic", default_value="/state_estimation")
+    freeze_odom_arg = DeclareLaunchArgument(
+        "prior_map_freeze_odom_without_features",
+        default_value="true",
+        description="先验图 ICP 锁定后是否冻结 FAST-LIO 里程计；go2_nav_stack 请 false",
+    )
+    match_dist_arg = DeclareLaunchArgument(
+        "prior_map_match_dist_sq",
+        default_value="49.0",
+        description="先验图匹配距离平方阈值（81≈9m，转圈时可放宽）",
+    )
+    min_eff_arg = DeclareLaunchArgument(
+        "prior_map_min_effective_points",
+        default_value="15",
+        description="至少多少有效点才更新 LIO 状态",
+    )
 
     livox = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(livox_driver),
@@ -93,6 +113,18 @@ def generate_launch_description():
             "initial_y": LaunchConfiguration("initial_y"),
             "initial_z": LaunchConfiguration("initial_z"),
             "initial_a": LaunchConfiguration("initial_a"),
+            "icp_planar_constraint": LaunchConfiguration("icp_planar_constraint"),
+            "publish_base_tf": LaunchConfiguration("publish_base_tf"),
+            "send_odom_base_tf": LaunchConfiguration("send_odom_base_tf"),
+            "enable_transform_publisher": LaunchConfiguration("enable_transform_publisher"),
+            "odom_output_topic": LaunchConfiguration("odom_output_topic"),
+            "prior_map_freeze_odom_without_features": LaunchConfiguration(
+                "prior_map_freeze_odom_without_features"
+            ),
+            "prior_map_match_dist_sq": LaunchConfiguration("prior_map_match_dist_sq"),
+            "prior_map_min_effective_points": LaunchConfiguration(
+                "prior_map_min_effective_points"
+            ),
         }.items(),
     )
 
@@ -105,6 +137,14 @@ def generate_launch_description():
     ld.add_action(iy_arg)
     ld.add_action(iz_arg)
     ld.add_action(ia_arg)
+    ld.add_action(icp_planar_arg)
+    ld.add_action(pub_base_arg)
+    ld.add_action(send_odom_arg)
+    ld.add_action(tf_pub_arg)
+    ld.add_action(odom_out_arg)
+    ld.add_action(freeze_odom_arg)
+    ld.add_action(match_dist_arg)
+    ld.add_action(min_eff_arg)
     ld.add_action(livox)
     ld.add_action(fl2)
     return ld

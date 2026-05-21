@@ -1,4 +1,4 @@
-"""导航层：map_package_manager + 网页 8080 +（可选）Qt 地图管理器 + 规划跟踪。"""
+"""导航层：map_package_manager + 网页 8888 +（可选）Qt 地图管理器 + 规划跟踪。"""
 
 from __future__ import annotations
 
@@ -39,19 +39,27 @@ def generate_launch_description():
                 description="启动 Qt map_viewer_gui + map_save_gui（地图管理器）",
             ),
             DeclareLaunchArgument(
+                "launch_web",
+                default_value="true",
+                description="启动静态网页 (默认 http://127.0.0.1:8888)",
+            ),
+            DeclareLaunchArgument(
                 "launch_rosbridge",
                 default_value="true",
                 description="网页需 rosbridge；先安装: sudo apt install ros-humble-rosbridge-server",
             ),
-            DeclareLaunchArgument("web_http_port", default_value="8080"),
+            DeclareLaunchArgument("web_http_port", default_value="8888"),
+            DeclareLaunchArgument("rosbridge_port", default_value="9090"),
             OpaqueFunction(function=_check_map_package),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(nav_launch),
                 launch_arguments={
                     "map_package_dir": LaunchConfiguration("map_package_dir"),
                     "launch_map_gui": LaunchConfiguration("launch_map_gui"),
+                    "launch_web": LaunchConfiguration("launch_web"),
                     "launch_rosbridge": LaunchConfiguration("launch_rosbridge"),
                     "web_http_port": LaunchConfiguration("web_http_port"),
+                    "rosbridge_port": LaunchConfiguration("rosbridge_port"),
                     "launch_localization": "false",
                 }.items(),
             ),

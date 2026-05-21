@@ -31,6 +31,11 @@ PATTERNS=(
   "icp_node"
   "kiss_icp"
   "livox_ros_driver2"
+  "rosbridge_websocket"
+  "rosbridge_server"
+  "run_rosbridge_safe"
+  "no_cache_http_server"
+  # 勿杀 start_go2_nav / go2_nav_oneclick：preflight 在 oneclick 内调用时会自杀，栈起不来
 )
 
 _kill_patterns TERM "${PATTERNS[@]}"
@@ -38,10 +43,19 @@ sleep 2
 _kill_patterns KILL "${PATTERNS[@]}"
 sleep 1
 
-# 释放可能被占用的端口（rosbridge 网页）
-if command -v fuser >/dev/null 2>&1; then
-  fuser -k 8080/tcp 2>/dev/null || true
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ -x "${ROOT}/scripts/free_nav_ports.sh" ]]; then
+  "${ROOT}/scripts/free_nav_ports.sh" 9090 9091 8888 8080 8081
+else
+  pkill -KILL -f "rosbridge_websocket" 2>/dev/null || true
+  if command -v fuser >/dev/null 2>&1; then
+    for _port in 8888 8081 8080 9090 9091; do
+      fuser -k "${_port}"/tcp 2>/dev/null || true
+    done
+    unset _port
+  fi
 fi
+rm -f /tmp/go2_nav_stack.lock /tmp/go2_nav_stack.rosbridge_port 2>/dev/null || true
 
 if pgrep -f "ros2 launch go2_nav_stack" >/dev/null 2>&1; then
   echo "警告: 仍有残留 launch 进程，可手动: ps aux | grep go2_nav"

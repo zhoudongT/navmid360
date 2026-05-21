@@ -128,6 +128,7 @@ sudo apt-get install -y \
   ros-${ROS_DISTRO}-rviz2 \
   ros-${ROS_DISTRO}-sensor-msgs \
   ros-${ROS_DISTRO}-sensor-msgs-py \
+  ros-${ROS_DISTRO}-sophus \
   ros-${ROS_DISTRO}-std-msgs \
   ros-${ROS_DISTRO}-tf2 \
   ros-${ROS_DISTRO}-tf2-geometry-msgs \
@@ -170,8 +171,18 @@ else
   echo "NOTE: Open3D C++ devel tarball is x86_64-only; on other arches install Open3D C++ yourself." >&2
 fi
 
-"${PYTHON_FOR_PIP}" -m pip install --user --upgrade pip
-"${PYTHON_FOR_PIP}" -m pip install --user --upgrade open3d
+# PyPI 官方源在国内常超时；默认走清华镜像并拉长超时。
+PIP_INDEX_URL="${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}"
+PIP_TRUSTED_HOST="${PIP_TRUSTED_HOST:-pypi.tuna.tsinghua.edu.cn}"
+PIP_DEFAULT_TIMEOUT="${PIP_DEFAULT_TIMEOUT:-300}"
+PIP_INSTALL_ARGS=(
+  --user
+  -i "${PIP_INDEX_URL}"
+  --trusted-host "${PIP_TRUSTED_HOST}"
+  --default-timeout "${PIP_DEFAULT_TIMEOUT}"
+)
+"${PYTHON_FOR_PIP}" -m pip install "${PIP_INSTALL_ARGS[@]}" --upgrade pip
+"${PYTHON_FOR_PIP}" -m pip install "${PIP_INSTALL_ARGS[@]}" --upgrade open3d
 
 if [[ ! -d /etc/ros/rosdep/sources.list.d ]]; then
   sudo rosdep init || true

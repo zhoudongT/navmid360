@@ -29,12 +29,15 @@ exec env -i \
     source /opt/ros/humble/setup.bash
   LIVOX_INSTALL=\"${REPO_ROOT}/install/livox_ros_driver2\"
   CMAKE_EXTRA=\"/opt/ros/humble\"
-  if [[ -f \"\${LIVOX_INSTALL}/share/livox_ros_driver2/package.xml\" ]]; then
-    source \"\${LIVOX_INSTALL}/../setup.bash\" 2>/dev/null || true
-    CMAKE_EXTRA=\"\${CMAKE_EXTRA}:\${LIVOX_INSTALL}\"
-  else
-    echo \"警告: 未找到已编译的 livox_ros_driver2，请先 colcon build livox_ros_driver2\" >&2
+  if [[ ! -f \"\${LIVOX_INSTALL}/share/livox_ros_driver2/package.xml\" ]]; then
+    echo \"错误: 未找到已编译的 livox_ros_driver2。\" >&2
+    echo \"  请先: bash scripts/build_all_humble.sh --livox-only\" >&2
+    echo \"  然后: source install/setup.bash\" >&2
+    echo \"  再编: bash scripts/build_all_humble.sh --rest-only\" >&2
+    exit 1
   fi
+  source \"\${LIVOX_INSTALL}/../setup.bash\" 2>/dev/null || true
+  CMAKE_EXTRA=\"\${CMAKE_EXTRA}:\${LIVOX_INSTALL}\"
   cd \"${REPO_ROOT}\"
   colcon build --symlink-install \\
     --packages-select icp_relocalization \\

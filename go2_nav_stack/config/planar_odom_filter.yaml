@@ -1,8 +1,17 @@
 planar_odom_filter_node:
   ros__parameters:
-    input_topic: /kiss_odom_raw
+    input_topic: /lio_odom_raw
     output_topic: /state_estimation
+    odom_frame: odom
+    base_frame: base_link
     lock_z: true
     z_fixed: 0.0
     planar_orientation: true
-    yaw_smooth_alpha: 0.12
+    yaw_smooth_alpha: 0.35
+    yaw_smooth_alpha_spin: 0.85
+    spin_angular_vel_threshold: 0.45
+    # 0=关闭跳变剔除（避免重定位后一直丢弃导致 odom 钉死）
+    max_xy_jump_m: 0.0
+    max_yaw_jump_deg: 0.0
+    apply_sensor_to_base_extrinsic: true
+    use_lio_stamp: true

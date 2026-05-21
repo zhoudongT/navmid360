@@ -17,7 +17,6 @@ setup(
             "config/planar_odom_filter.yaml",
             "config/map_cloud_display.yaml",
             "config/nav2_mppi_params.yaml",
-            "config/local_costmap_display.yaml",
             "config/local_path_display.yaml",
             "config/local_costmap_standalone.yaml",
             "config/nav2_controller_bringup.yaml",
@@ -35,7 +34,7 @@ setup(
     zip_safe=True,
     maintainer="navmid360",
     maintainer_email="user@todo.todo",
-    description="Go2 single-map: KISS-ICP + ICP + dong_path global planner + Nav2 MPPI local",
+    description="Go2 single-map: FAST-LIO2 + ICP + dong_path + Nav2 MPPI (see frame_config.yaml)",
     license="Apache-2.0",
     entry_points={
         "console_scripts": [
@@ -48,7 +47,6 @@ setup(
             "global_path_server = go2_nav_stack.global_path_server:main",
             "navigation_state_machine = go2_nav_stack.navigation_state_machine:main",
             "mppi_path_follower = go2_nav_stack.mppi_path_follower_node:main",
-            "local_costmap_display = go2_nav_stack.local_costmap_display_node:main",
             "local_path_display = go2_nav_stack.local_path_display_node:main",
             "nav2_controller_bringup = go2_nav_stack.nav2_controller_bringup_node:main",
             "build_scan_context_db = go2_nav_stack.build_scan_context_db:main",

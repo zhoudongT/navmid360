@@ -590,7 +590,8 @@ private:
         last_good_state_point = x;
         sync_state_from_ikfom(x);
         last_frame_effct_feat_num = 0;
-        prior_map_has_good_lidar_fix = true;
+        // 重定位后须重新积累有效特征点才视为稳定；避免立刻用弱匹配更新 odom（快速转圈易飞）
+        prior_map_has_good_lidar_fix = false;
         prior_map_probe_frame = true;
     }
 
@@ -1349,9 +1350,11 @@ private:
             double t_update_end = omp_get_wtime();
 
             /******* Publish odometry *******/
+            // 先验图 ICP 锁定后仍发布 /Odometry，供 go2 tf_manager 与 planar_odom_filter 使用；
+            // send_odom_base_tf=false 时仅不发 TF，由外部 tf_manager 发布 odom->base。
             const bool publish_dynamic_odom_tf =
                 !locate_in_prior_map || !prior_map_has_good_lidar_fix || !hold_odom_frozen;
-            if (publish_dynamic_odom_tf)
+            if (publish_dynamic_odom_tf || (locate_in_prior_map && hold_odom_frozen))
             {
                 publish_odometry(pubOdomAftMapped_);
             }

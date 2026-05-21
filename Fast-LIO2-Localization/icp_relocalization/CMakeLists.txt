@@ -35,10 +35,24 @@ include_directories(${PCL_INCLUDE_DIRS})
 link_directories(${PCL_LIBRARY_DIRS})
 add_definitions(${PCL_DEFINITIONS})
 
+# Ubuntu 22.04: PCL 可能引用不存在的 /usr/lib/libOpenNI2.so，实际在 x86_64-linux-gnu 下
+set(ICP_PCL_LIBS
+  ${PCL_COMMON_LIBRARIES}
+  ${PCL_IO_LIBRARIES}
+  ${PCL_FILTERS_LIBRARIES}
+  ${PCL_REGISTRATION_LIBRARIES}
+  ${PCL_SEARCH_LIBRARIES}
+  ${PCL_KDTREE_LIBRARIES}
+)
+find_library(OPENNI2_LIB NAMES OpenNI2 PATHS /usr/lib/x86_64-linux-gnu NO_DEFAULT_PATH)
+if(OPENNI2_LIB)
+  list(APPEND ICP_PCL_LIBS ${OPENNI2_LIB})
+endif()
+
 add_executable(icp_node src/icp_node.cpp)
 find_library(LIBUSB_1 NAMES usb-1.0 PATHS /lib/x86_64-linux-gnu /usr/lib/x86_64-linux-gnu REQUIRED)
-target_link_libraries(icp_node ${PCL_LIBRARIES} ${LIBUSB_1})
-ament_target_dependencies(icp_node rclcpp std_msgs sensor_msgs geometry_msgs tf2 tf2_ros tf2_geometry_msgs pcl_conversions)
+target_link_libraries(icp_node ${ICP_PCL_LIBS} ${LIBUSB_1})
+ament_target_dependencies(icp_node rclcpp std_msgs sensor_msgs geometry_msgs tf2 tf2_ros tf2_geometry_msgs tf2_eigen pcl_conversions)
 if(USE_LIVOX)
   ament_target_dependencies(icp_node livox_ros_driver2)
 endif()

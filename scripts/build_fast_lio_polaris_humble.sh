@@ -27,6 +27,9 @@ exec env -i \
   bash -lc "
     set -e
     source /opt/ros/humble/setup.bash
+    if [[ -f \"${REPO_ROOT}/install/setup.bash\" ]]; then
+      source \"${REPO_ROOT}/install/setup.bash\"
+    fi
     LIVOX_INSTALL=\"${REPO_ROOT}/install/livox_ros_driver2\"
     CMAKE_EXTRA=\"/opt/ros/humble\"
     if [[ -f \"\${LIVOX_INSTALL}/share/livox_ros_driver2/package.xml\" ]]; then

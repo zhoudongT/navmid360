@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Go2 实车一键启动：Livox + KISS-ICP + ICP + TF + 网页规划 + Qt 地图管理 + 动态绕障
+# Go2 实车一键启动：Livox + FAST-LIO2 + ICP + TF + 网页规划 + Qt 地图管理 + Nav2 MPPI
 #
 # 重定位（默认）：不自动 Scan Context，请在 Qt map_viewer 中：
 #   1. 点「当前姿态」-> 在地图上点机器人位置
@@ -21,7 +21,9 @@ PRIOR_PCD="${PRIOR_PCD:-/home/allen/maps/scans_0.5m.pcd}"
 LAUNCH_RVIZ="${LAUNCH_RVIZ:-true}"
 LAUNCH_MAP_GUI="${LAUNCH_MAP_GUI:-true}"
 LAUNCH_ROSBRIDGE="${LAUNCH_ROSBRIDGE:-true}"
-WEB_PORT="${WEB_PORT:-8080}"
+LAUNCH_WEB="${LAUNCH_WEB:-true}"
+WEB_PORT="${WEB_PORT:-8888}"
+ROSBRIDGE_PORT="${ROSBRIDGE_PORT:-9090}"
 RELOC_AUTO_START="${RELOC_AUTO_START:-false}"
 
 while [[ $# -gt 0 ]]; do
@@ -29,8 +31,9 @@ while [[ $# -gt 0 ]]; do
     --no-gui) LAUNCH_MAP_GUI=false; shift ;;
     --no-rviz) LAUNCH_RVIZ=false; shift ;;
     --no-web-bridge) LAUNCH_ROSBRIDGE=false; shift ;;
+    --no-web) LAUNCH_WEB=false; shift ;;
     -h|--help)
-      echo "用法: $0 [--no-gui] [--no-rviz] [--no-web-bridge]"
+      echo "用法: $0 [--no-gui] [--no-rviz] [--no-web] [--no-web-bridge]"
       echo "环境变量: MAP_PACKAGE PRIOR_PCD LAUNCH_RVIZ LAUNCH_MAP_GUI WEB_PORT RELOC_AUTO_START"
       exit 0
       ;;
@@ -46,9 +49,23 @@ fi
 set +u
 source /opt/ros/humble/setup.bash
 
+if [[ ! -f "$ROOT/install/livox_ros_driver2/share/livox_ros_driver2/package.xml" ]]; then
+  echo "错误: livox_ros_driver2 未编译。须先编 Livox，再编其余包:"
+  echo "  cd $ROOT"
+  echo "  source /opt/ros/humble/setup.bash"
+  echo "  bash scripts/build_all_humble.sh --livox-only"
+  echo "  source install/setup.bash"
+  echo "  bash scripts/build_all_humble.sh --rest-only"
+  exit 1
+fi
+if [[ ! -f "$ROOT/install/fast_lio/share/fast_lio/package.xml" ]]; then
+  echo "错误: fast_lio 未编译，请运行:"
+  echo "  cd $ROOT && bash scripts/build_all_humble.sh"
+  exit 1
+fi
 if [[ ! -f "$ROOT/install/setup.bash" ]]; then
-  echo "错误: 未编译工作区，请先运行:"
-  echo "  cd $ROOT && colcon build --packages-select livox_ros_driver2 kiss_icp icp_relocalization dong_octomap go2_nav_stack octo_planner"
+  echo "错误: 工作区未完整编译，请运行:"
+  echo "  cd $ROOT && bash scripts/build_all_humble.sh"
   exit 1
 fi
 # shellcheck source=/dev/null
@@ -73,21 +90,35 @@ if [[ "$LAUNCH_ROSBRIDGE" == "true" ]] && ! ros2 pkg prefix rosbridge_server &>/
   exit 1
 fi
 
-KILL_SCRIPT="$ROOT/scripts/go2_nav_kill.sh"
-if [[ -x "$KILL_SCRIPT" ]]; then
-  echo ">>> 先结束旧进程..."
-  "$KILL_SCRIPT" || true
-  sleep 2
+PREFLIGHT="$ROOT/scripts/go2_nav_preflight.sh"
+if [[ -x "$PREFLIGHT" ]]; then
+  ROSBRIDGE_PORT="$ROSBRIDGE_PORT" WEB_PORT="$WEB_PORT" "$PREFLIGHT"
+  if [[ -f /tmp/go2_nav_stack.rosbridge_port ]]; then
+    ROSBRIDGE_PORT="$(cat /tmp/go2_nav_stack.rosbridge_port)"
+  fi
+else
+  KILL_SCRIPT="$ROOT/scripts/go2_nav_kill.sh"
+  if [[ -x "$KILL_SCRIPT" ]]; then
+    echo ">>> 先结束旧进程..."
+    "$KILL_SCRIPT" || true
+    sleep 2
+  fi
 fi
+
+LOCK_FILE="/tmp/go2_nav_stack.lock"
+echo $$ >"${LOCK_FILE}"
+trap 'rm -f "${LOCK_FILE}"' EXIT
 
 echo "=========================================="
 echo " Go2 导航一键启动"
 echo " 地图包:     $MAP_PACKAGE"
 echo " 先验 PCD:   $PRIOR_PCD"
-echo " 网页:       http://127.0.0.1:${WEB_PORT}"
+echo " 网页:       $([ "$LAUNCH_WEB" = true ] && echo "http://127.0.0.1:${WEB_PORT}" || echo '未启动 (--no-web)')"
+echo " rosbridge:  ws://127.0.0.1:${ROSBRIDGE_PORT}"
 echo " Qt Manager: $LAUNCH_MAP_GUI"
 echo " RViz:       $LAUNCH_RVIZ"
 echo " 重定位:     $([ "$RELOC_AUTO_START" = true ] && echo '开机自动 ScanContext' || echo '手动 Qt「当前姿态」点击')"
+echo " 里程计:     FAST-LIO2 + ICP 先验图"
 echo " 局部规划:   Nav2 MPPI；全局路径 /planned_path，局部路径 /local_path"
 echo "=========================================="
 
@@ -96,6 +127,8 @@ exec ros2 launch go2_nav_stack go2_full_stack.launch.py \
   prior_pcd_path:="$PRIOR_PCD" \
   launch_rviz:="$LAUNCH_RVIZ" \
   launch_map_gui:="$LAUNCH_MAP_GUI" \
+  launch_web:="$LAUNCH_WEB" \
   launch_rosbridge:="$LAUNCH_ROSBRIDGE" \
   web_http_port:="$WEB_PORT" \
+  rosbridge_port:="$ROSBRIDGE_PORT" \
   reloc_auto_start:="$RELOC_AUTO_START"

@@ -1,48 +1,35 @@
 #!/usr/bin/env python3
-"""将 /cloud_registered 变换到 map 系发布，与先验地图/ICP 白点云对齐显示。
+"""将 FAST-LIO /cloud_registered（含 intensity）变换到 map 系。
 
-重定位完成前不发布（避免 map=odom 占位时点云在 RViz 里「旋转漂移」）。
-重定位后使用锁定的 T_map_odom + 实时 T_odom_livox，与 tf_manager 一致且 map->odom 不再被改。
+- 用手动 4x4 变换保留 intensity（tf2 do_transform_cloud 常会丢通道）。
+- /transformed_cloud 由 icp_node 在锁定后用实时 TF 发布，勿与此处混用。
 """
 
 from __future__ import annotations
 
-import numpy as np
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from rclpy.time import Time
-from sensor_msgs.msg import PointCloud2
+from sensor_msgs.msg import PointCloud2, PointField
 from sensor_msgs_py import point_cloud2
 from std_msgs.msg import Bool, Header, String
 import tf2_ros
 from tf2_ros import TransformException
 
 
-def _quat_to_rot(qx: float, qy: float, qz: float, qw: float) -> np.ndarray:
+def _quat_to_rot(qx: float, qy: float, qz: float, qw: float) -> tuple[
+    tuple[float, float, float],
+    tuple[float, float, float],
+    tuple[float, float, float],
+]:
     xx, yy, zz = qx * qx, qy * qy, qz * qz
     xy, xz, yz = qx * qy, qx * qz, qy * qz
     wx, wy, wz = qw * qx, qw * qy, qw * qz
-    return np.array(
-        [
-            [1 - 2 * (yy + zz), 2 * (xy - wz), 2 * (xz + wy)],
-            [2 * (xy + wz), 1 - 2 * (xx + zz), 2 * (yz - wx)],
-            [2 * (xz - wy), 2 * (yz + wx), 1 - 2 * (xx + yy)],
-        ],
-        dtype=np.float64,
-    )
-
-
-def _stamp_to_mat4(stamp) -> np.ndarray:
-    t = stamp.transform.translation
-    r = stamp.transform.rotation
-    rot = _quat_to_rot(r.x, r.y, r.z, r.w)
-    mat = np.eye(4, dtype=np.float64)
-    mat[:3, :3] = rot
-    mat[0, 3] = t.x
-    mat[1, 3] = t.y
-    mat[2, 3] = t.z
-    return mat
+    r0 = (1.0 - 2.0 * (yy + zz), 2.0 * (xy - wz), 2.0 * (xz + wy))
+    r1 = (2.0 * (xy + wz), 1.0 - 2.0 * (xx + zz), 2.0 * (yz - wx))
+    r2 = (2.0 * (xz - wy), 2.0 * (yz + wx), 1.0 - 2.0 * (xx + yy))
+    return r0, r1, r2
 
 
 class MapCloudDisplayNode(Node):
@@ -51,124 +38,194 @@ class MapCloudDisplayNode(Node):
         self.declare_parameter("input_topic", "/cloud_registered")
         self.declare_parameter("output_topic", "/cloud_registered_map")
         self.declare_parameter("target_frame", "map")
-        self.declare_parameter("odom_frame", "odom")
         self.declare_parameter("tf_timeout_sec", 0.25)
         self.declare_parameter("require_reloc_ok", True)
+        self.declare_parameter("use_latest_tf", True)
         self.declare_parameter("max_points", 12000)
         self.declare_parameter("min_publish_interval_sec", 0.08)
 
-        in_topic = self.get_parameter("input_topic").value
-        out_topic = self.get_parameter("output_topic").value
+        self._in_topic = str(self.get_parameter("input_topic").value)
+        self._out_topic = str(self.get_parameter("output_topic").value)
         self._target_frame = str(self.get_parameter("target_frame").value)
-        self._odom_frame = str(self.get_parameter("odom_frame").value)
         self._tf_timeout = float(self.get_parameter("tf_timeout_sec").value)
         self._require_reloc = bool(self.get_parameter("require_reloc_ok").value)
+        self._use_latest_tf = bool(self.get_parameter("use_latest_tf").value)
         self._max_points = max(1000, int(self.get_parameter("max_points").value))
         self._min_interval = float(self.get_parameter("min_publish_interval_sec").value)
         self._last_pub_time = 0.0
         self._reloc_ok = False
-        self._t_map_odom: np.ndarray | None = None
+        self._warned_no_intensity = False
 
         cache = rclpy.duration.Duration(seconds=30.0)
         self._tf_buffer = tf2_ros.Buffer(cache_time=cache)
         self._tf_listener = tf2_ros.TransformListener(self._tf_buffer, self)
-        self._pub = self.create_publisher(PointCloud2, out_topic, 2)
+        self._pub = self.create_publisher(PointCloud2, self._out_topic, 2)
+
         self.create_subscription(
-            PointCloud2, in_topic, self._on_cloud, qos_profile_sensor_data
+            PointCloud2, self._in_topic, self._on_lio_cloud, qos_profile_sensor_data
         )
         self.create_subscription(Bool, "/relocalization/ok", self._on_reloc_ok, 10)
         self.create_subscription(String, "/relocalization/status", self._on_reloc_status, 10)
         self.get_logger().info(
-            f"{in_topic} -> {out_topic} (frame={self._target_frame}, "
-            f"require_reloc_ok={self._require_reloc})"
+            f"/cloud_registered_map: 彩色 {self._in_topic} -> {self._out_topic} "
+            f"(TF -> {self._target_frame}, 保留 intensity)"
         )
 
+    def _set_reloc_ok(self, ok: bool) -> None:
+        self._reloc_ok = ok
+        if ok:
+            self.get_logger().info("重定位完成：发布彩色 /cloud_registered_map")
+
     def _on_reloc_ok(self, msg: Bool) -> None:
-        if msg.data and not self._reloc_ok:
-            self._refresh_map_odom_lock()
-        elif not msg.data:
-            self._reloc_ok = False
-            self._t_map_odom = None
+        if msg.data:
+            self._set_reloc_ok(True)
 
     def _on_reloc_status(self, msg: String) -> None:
         if msg.data.strip() == "RELOCALIZED":
-            self._reloc_ok = True
-            self._refresh_map_odom_lock()
+            self._set_reloc_ok(True)
 
-    def _refresh_map_odom_lock(self) -> None:
-        try:
-            tf = self._tf_buffer.lookup_transform(
-                self._target_frame,
-                self._odom_frame,
-                Time(),
-                timeout=rclpy.duration.Duration(seconds=self._tf_timeout),
-            )
-        except TransformException as ex:
-            self.get_logger().warn(f"锁定 map->odom 失败: {ex}")
-            return
-        self._t_map_odom = _stamp_to_mat4(tf)
-        self._reloc_ok = True
-        t = tf.transform.translation
-        self.get_logger().info(
-            f"map 已锁定: T_map_odom=({t.x:.2f},{t.y:.2f},{t.z:.2f})，"
-            f"{self.get_parameter('output_topic').value} 将与先验图对齐"
-        )
-
-    def _on_cloud(self, msg: PointCloud2) -> None:
-        if not msg.header.frame_id:
-            return
+    def _gate_reloc(self) -> bool:
         if self._require_reloc and not self._reloc_ok:
             self.get_logger().warn(
-                "未重定位，跳过 /cloud_registered_map（请 Qt「当前姿态」+ ICP 完成后再显示）",
+                "未重定位，跳过 /cloud_registered_map",
                 throttle_duration_sec=8.0,
             )
-            return
-        if self._t_map_odom is None:
-            self._refresh_map_odom_lock()
-            if self._t_map_odom is None:
-                return
+            return False
+        return True
 
+    def _throttle_ok(self) -> bool:
         now = self.get_clock().now().nanoseconds * 1e-9
         if now - self._last_pub_time < self._min_interval:
-            return
+            return False
+        self._last_pub_time = now
+        return True
 
-        try:
-            t_odom_src = self._tf_buffer.lookup_transform(
-                self._odom_frame,
-                msg.header.frame_id,
-                Time(),
-                timeout=rclpy.duration.Duration(seconds=self._tf_timeout),
-            )
-        except TransformException:
-            self.get_logger().warn(
-                f"TF {msg.header.frame_id}->{self._odom_frame} 不可用",
-                throttle_duration_sec=5.0,
-            )
-            return
+    def _intensity_field(self, msg: PointCloud2) -> str | None:
+        for f in msg.fields:
+            if f.name in ("intensity", "reflectivity", "i"):
+                return f.name
+        return None
 
-        t_odom_src_mat = _stamp_to_mat4(t_odom_src)
-        t_map_src = self._t_map_odom @ t_odom_src_mat
-        rot = t_map_src[:3, :3]
-        trans = t_map_src[:3, 3]
+    def _lookup_map_transform(self, src_frame: str, stamp: Time):
+        timeout = rclpy.duration.Duration(seconds=self._tf_timeout)
+        times = [Time()] if self._use_latest_tf else []
+        if stamp.nanoseconds > 0:
+            times.insert(0, stamp)
+        elif not times:
+            times = [Time()]
+        last_ex = None
+        for t in times:
+            try:
+                return self._tf_buffer.lookup_transform(
+                    self._target_frame,
+                    src_frame,
+                    t,
+                    timeout=timeout,
+                )
+            except TransformException as ex:
+                last_ex = ex
+        raise last_ex  # type: ignore[misc]
 
-        raw = list(
-            point_cloud2.read_points(msg, field_names=("x", "y", "z"), skip_nans=True)
-        )
-        if not raw:
-            return
-        step = max(1, len(raw) // self._max_points)
-        pts = []
-        for i in range(0, len(raw), step):
-            p = raw[i]
-            v = np.array([p[0], p[1], p[2]], dtype=np.float64)
-            w = rot @ v + trans
-            pts.append((float(w[0]), float(w[1]), float(w[2])))
+    def _transform_to_map(self, msg: PointCloud2, trans) -> PointCloud2:
+        t = trans.transform.translation
+        q = trans.transform.rotation
+        r0, r1, r2 = _quat_to_rot(q.x, q.y, q.z, q.w)
+        tx, ty, tz = float(t.x), float(t.y), float(t.z)
 
+        def map_pt(x: float, y: float, z: float) -> tuple[float, float, float]:
+            nx = r0[0] * x + r0[1] * y + r0[2] * z + tx
+            ny = r1[0] * x + r1[1] * y + r1[2] * z + ty
+            nz = r2[0] * x + r2[1] * y + r2[2] * z + tz
+            return nx, ny, nz
+
+        intensity_name = self._intensity_field(msg)
         hdr = Header()
         hdr.stamp = self.get_clock().now().to_msg()
         hdr.frame_id = self._target_frame
-        self._pub.publish(point_cloud2.create_cloud_xyz32(hdr, pts))
-        self._last_pub_time = now
+
+        if intensity_name:
+            raw = list(
+                point_cloud2.read_points(
+                    msg,
+                    field_names=("x", "y", "z", intensity_name),
+                    skip_nans=True,
+                )
+            )
+            fields = [
+                PointField(name="x", offset=0, datatype=PointField.FLOAT32, count=1),
+                PointField(name="y", offset=4, datatype=PointField.FLOAT32, count=1),
+                PointField(name="z", offset=8, datatype=PointField.FLOAT32, count=1),
+                PointField(
+                    name="intensity",
+                    offset=12,
+                    datatype=PointField.FLOAT32,
+                    count=1,
+                ),
+            ]
+            pts = []
+            for row in raw:
+                nx, ny, nz = map_pt(float(row[0]), float(row[1]), float(row[2]))
+                pts.append((nx, ny, nz, float(row[3])))
+            return point_cloud2.create_cloud(hdr, fields, pts)
+
+        if not self._warned_no_intensity:
+            self._warned_no_intensity = True
+            names = [f.name for f in msg.fields]
+            self.get_logger().warn(
+                f"/cloud_registered 无 intensity 字段 (fields={names})，仅发布 xyz"
+            )
+        raw = list(point_cloud2.read_points(msg, field_names=("x", "y", "z"), skip_nans=True))
+        fields = [
+            PointField(name="x", offset=0, datatype=PointField.FLOAT32, count=1),
+            PointField(name="y", offset=4, datatype=PointField.FLOAT32, count=1),
+            PointField(name="z", offset=8, datatype=PointField.FLOAT32, count=1),
+        ]
+        pts = [map_pt(float(r[0]), float(r[1]), float(r[2])) for r in raw]
+        return point_cloud2.create_cloud(hdr, fields, pts)
+
+    def _downsample_cloud(self, msg: PointCloud2) -> PointCloud2:
+        intensity_name = self._intensity_field(msg)
+        if intensity_name:
+            field_names = ("x", "y", "z", "intensity")
+            fields = [
+                PointField(name="x", offset=0, datatype=PointField.FLOAT32, count=1),
+                PointField(name="y", offset=4, datatype=PointField.FLOAT32, count=1),
+                PointField(name="z", offset=8, datatype=PointField.FLOAT32, count=1),
+                PointField(
+                    name="intensity", offset=12, datatype=PointField.FLOAT32, count=1
+                ),
+            ]
+        else:
+            field_names = ("x", "y", "z")
+            fields = [
+                PointField(name="x", offset=0, datatype=PointField.FLOAT32, count=1),
+                PointField(name="y", offset=4, datatype=PointField.FLOAT32, count=1),
+                PointField(name="z", offset=8, datatype=PointField.FLOAT32, count=1),
+            ]
+
+        raw = list(point_cloud2.read_points(msg, field_names=field_names, skip_nans=True))
+        if len(raw) <= self._max_points:
+            return msg
+        step = max(1, len(raw) // self._max_points)
+        pts = [raw[i] for i in range(0, len(raw), step)]
+        hdr = Header()
+        hdr.stamp = msg.header.stamp
+        hdr.frame_id = msg.header.frame_id
+        return point_cloud2.create_cloud(hdr, fields, pts)
+
+    def _on_lio_cloud(self, msg: PointCloud2) -> None:
+        if not self._gate_reloc() or not msg.header.frame_id or not self._throttle_ok():
+            return
+        try:
+            stamp = Time.from_msg(msg.header.stamp)
+            trans = self._lookup_map_transform(msg.header.frame_id, stamp)
+            out = self._transform_to_map(msg, trans)
+            self._pub.publish(self._downsample_cloud(out))
+        except TransformException as ex:
+            self.get_logger().warn(
+                f"TF {msg.header.frame_id}->{self._target_frame}: {ex}",
+                throttle_duration_sec=5.0,
+            )
 
 
 def main() -> None:

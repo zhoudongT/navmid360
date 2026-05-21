@@ -34,9 +34,11 @@ const toggleTraversable = document.getElementById("toggle-traversable");
 const togglePreblocked = document.getElementById("toggle-preblocked");
 const toggleRisk = document.getElementById("toggle-risk");
 
+/** 网页 HTTP 默认 8888；rosbridge WebSocket 固定 9090（与 launch rosbridge_port 一致） */
 function defaultRosbridgeUrl() {
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-  return `${protocol}://${window.location.hostname || "localhost"}:9090`;
+  const wsPort = new URLSearchParams(window.location.search).get("ws_port") || "9090";
+  return `${protocol}://${window.location.hostname || "localhost"}:${wsPort}`;
 }
 
 wsInput.value = defaultRosbridgeUrl();

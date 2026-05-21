@@ -1,6 +1,0 @@
-local_costmap_display:
-  ros__parameters:
-    input_topics:
-      - /costmap/costmap
-      - /local_costmap/costmap
-    output_topic: /local_costmap/map

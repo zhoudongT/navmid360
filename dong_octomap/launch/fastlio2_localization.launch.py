@@ -68,12 +68,31 @@ def _launch_setup(context, *args, **kwargs):
         LaunchConfiguration("prior_map_match_dist_sq").perform(context)
     )
     prior_map_min_eff = int(LaunchConfiguration("prior_map_min_effective_points").perform(context))
+    freeze_odom_cfg = LaunchConfiguration(
+        "prior_map_freeze_odom_without_features"
+    ).perform(context).strip().lower()
+    prior_map_freeze_odom = freeze_odom_cfg in ("1", "true", "yes", "on")
     publish_base_tf = LaunchConfiguration("publish_base_tf").perform(context).lower() in (
         "1",
         "true",
         "yes",
         "on",
     )
+    send_odom_tf_cfg = LaunchConfiguration("send_odom_base_tf").perform(context).strip().lower()
+    if send_odom_tf_cfg in ("1", "true", "yes", "on"):
+        send_odom_base_tf = True
+    elif send_odom_tf_cfg in ("0", "false", "no", "off"):
+        send_odom_base_tf = False
+    else:
+        send_odom_base_tf = not (use_prior and publish_base_tf)
+
+    enable_tf_pub = LaunchConfiguration("enable_transform_publisher").perform(context).lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    odom_out = LaunchConfiguration("odom_output_topic").perform(context).strip() or "/state_estimation"
 
     fast_lio_params = [
         fl_cfg,
@@ -84,10 +103,9 @@ def _launch_setup(context, *args, **kwargs):
             "filter_size_map": filter_size_map,
             "prior_map_skip_load_downsample": prior_map_skip_voxel,
             "prior_map_match_dist_sq": prior_map_match_dist_sq,
-            "prior_map_freeze_odom_without_features": True,
+            "prior_map_freeze_odom_without_features": prior_map_freeze_odom,
             "prior_map_min_effective_points": prior_map_min_eff,
-            # 先验+静态 odom->base 时关闭 FAST-LIO 动态 base TF，避免与 static_transform_publisher 冲突
-            "common.send_odom_base_tf": not (use_prior and publish_base_tf),
+            "common.send_odom_base_tf": send_odom_base_tf,
         },
     ]
 
@@ -100,24 +118,27 @@ def _launch_setup(context, *args, **kwargs):
         "on",
     )
 
-    nodes = [
-        Node(
-            package="icp_relocalization",
-            executable="transform_publisher",
-            name="transform_publisher",
-            output="screen",
-        ),
-    ]
-
-    if publish_base_tf:
+    nodes = []
+    if enable_tf_pub:
         nodes.append(
             Node(
-                package="tf2_ros",
-                executable="static_transform_publisher",
-                name="livox_to_imu_static_tf",
-                arguments=["0", "0", "0", "0", "0", "0", "livox_frame", "imu_link"],
+                package="icp_relocalization",
+                executable="transform_publisher",
+                name="transform_publisher",
+                output="screen",
             )
         )
+
+    # go2_nav_stack：tf_manager 发 base->livox；此处仅 livox->imu（FAST-LIO sensor_frame）
+    nodes.append(
+        Node(
+            package="tf2_ros",
+            executable="static_transform_publisher",
+            name="livox_to_imu_static_tf",
+            arguments=["0", "0", "0", "0", "0", "0", "livox_frame", "imu_link"],
+        )
+    )
+    if publish_base_tf:
         nodes.append(
             Node(
                 package="tf2_ros",
@@ -182,7 +203,7 @@ def _launch_setup(context, *args, **kwargs):
                     executable="fastlio_mapping",
                     parameters=fast_lio_params,
                     output="screen",
-                    remappings=[("/Odometry", "/state_estimation")],
+                    remappings=[("/Odometry", odom_out)],
                 ),
             ],
         )
@@ -194,7 +215,7 @@ def _launch_setup(context, *args, **kwargs):
                 executable="fastlio_mapping",
                 parameters=fast_lio_params,
                 output="screen",
-                remappings=[("/Odometry", "/state_estimation")],
+                remappings=[("/Odometry", odom_out)],
             )
         )
 
@@ -278,9 +299,29 @@ def generate_launch_description():
                 description="先验模式至少多少有效点才更新 odom TF（否则冻结防漂）",
             ),
             DeclareLaunchArgument(
+                "prior_map_freeze_odom_without_features",
+                default_value="true",
+                description="ICP 锁定后冻结 FAST-LIO 里程计；go2_nav_stack 请 false",
+            ),
+            DeclareLaunchArgument(
                 "publish_base_tf",
                 default_value="true",
                 description="发布 livox_frame->imu_link、base_link->imu_link 静态 TF",
+            ),
+            DeclareLaunchArgument(
+                "send_odom_base_tf",
+                default_value="",
+                description="FAST-LIO 是否发布 odom->base；go2_nav_stack 请设 false，由 tf_manager 发布",
+            ),
+            DeclareLaunchArgument(
+                "enable_transform_publisher",
+                default_value="true",
+                description="是否启动 icp transform_publisher；go2_nav_stack 请设 false",
+            ),
+            DeclareLaunchArgument(
+                "odom_output_topic",
+                default_value="/state_estimation",
+                description="FAST-LIO /Odometry 重映射话题；go2 导航栈常用 /lio_odom_raw",
             ),
             DeclareLaunchArgument(
                 "icp_planar_constraint",

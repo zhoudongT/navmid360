@@ -11,6 +11,7 @@ Panels:
         - /TF1/Frames1
         - /Odometry1/Shape1
         - /Path2
+        - /LocalCostmap1
       Splitter Ratio: 0.5147679448127747
     Tree Height: 787
   - Class: rviz_common/Selection
@@ -257,27 +258,27 @@ Visualization Manager:
                 {}
       Update Interval: 0.20000000298023224
       Value: true
-    - Alpha: 0.699999988079071
+    - Alpha: 0.55
       Class: rviz_default_plugins/Map
-      Color Scheme: map
+      Color Scheme: costmap
       Draw Behind: false
-      Enabled: false
-      Name: Map
+      Enabled: true
+      Name: LocalCostmap
       Topic:
-        Depth: 5
+        Depth: 1
         Durability Policy: Volatile
         Filter size: 10
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /projected_map
+        Value: /costmap/costmap
       Update Topic:
-        Depth: 5
+        Depth: 1
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /projected_map_updates
+        Value: /costmap/costmap
       Use Timestamp: false
-      Value: false
+      Value: true
     - Class: rviz_common/Group
       Displays:
         - Alpha: 1

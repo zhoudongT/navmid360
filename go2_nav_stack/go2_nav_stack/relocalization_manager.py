@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""重定位：更新 map->odom（运动时靠 KISS 里程计）。
+"""重定位：更新 map->odom（运动时靠 FAST-LIO2 里程计 /state_estimation）。
 
 模式（由参数决定）：
   - manual（默认一键启动）：Qt/网页「当前姿态」点选 -> /initialpose -> ICP -> /relocalization/pose
@@ -226,8 +226,12 @@ class RelocalizationManager(Node):
         self._reloc_busy = False
         self._reloc_locked = True
         out = PoseWithCovarianceStamped()
-        out.header = msg.header
-        if not out.header.frame_id:
+        out.header.stamp = msg.header.stamp
+        out.header.frame_id = msg.header.frame_id or "map"
+        if out.header.frame_id != "map":
+            self.get_logger().warn(
+                f"/icp_result frame={out.header.frame_id}，强制为 map"
+            )
             out.header.frame_id = "map"
         out.pose = msg.pose
         self._reloc_pose_pub.publish(out)

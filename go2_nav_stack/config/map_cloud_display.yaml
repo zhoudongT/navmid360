@@ -3,9 +3,8 @@ map_cloud_display_node:
     input_topic: /cloud_registered
     output_topic: /cloud_registered_map
     target_frame: map
-    odom_frame: odom
     tf_timeout_sec: 0.25
-    # 未完成 ICP 重定位前不发布，避免点云在 map 里转圈
     require_reloc_ok: true
+    use_latest_tf: true
     max_points: 12000
     min_publish_interval_sec: 0.08

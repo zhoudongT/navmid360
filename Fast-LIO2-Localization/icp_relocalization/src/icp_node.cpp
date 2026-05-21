@@ -19,6 +19,9 @@
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <tf2_ros/transform_broadcaster.h>
+#include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_listener.h>
+#include <tf2_eigen/tf2_eigen.hpp>
 #ifdef USE_LIVOX
 #include <livox_ros_driver2/msg/custom_msg.hpp>
 #endif
@@ -54,8 +57,11 @@ public:
         this->declare_parameter("icp_coarse_yaw_half_range_deg", 30.0);
         this->declare_parameter("icp_coarse_yaw_step_deg", 3.0);
         this->declare_parameter("odom_frame_id", "odom");
+        this->declare_parameter("lidar_frame_id", "livox_frame");
+        this->declare_parameter("tf_lookup_timeout_sec", 0.25);
         this->declare_parameter("publish_map_to_odom_tf", false);
         this->declare_parameter("continuous_tracking", false);
+        this->declare_parameter("publish_transformed_cloud_after_lock", true);
         this->declare_parameter("icp_result_publish_interval", 15);
         this->declare_parameter("use_ndt_prefit", true);
         this->declare_parameter("ndt_resolution", 1.0);
@@ -87,8 +93,15 @@ public:
         this->get_parameter("icp_coarse_yaw_half_range_deg", icp_coarse_yaw_half_range_deg_);
         this->get_parameter("icp_coarse_yaw_step_deg", icp_coarse_yaw_step_deg_);
         this->get_parameter("odom_frame_id", odom_frame_id_);
+        this->get_parameter("lidar_frame_id", lidar_frame_id_);
+        this->get_parameter("tf_lookup_timeout_sec", tf_lookup_timeout_sec_);
         this->get_parameter("publish_map_to_odom_tf", publish_map_to_odom_tf_);
+
+        tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
+        tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
         this->get_parameter("continuous_tracking", continuous_tracking_);
+        this->get_parameter(
+            "publish_transformed_cloud_after_lock", publish_transformed_cloud_after_lock_);
         this->get_parameter("icp_result_publish_interval", icp_result_publish_interval_);
         this->get_parameter("use_ndt_prefit", use_ndt_prefit_);
         this->get_parameter("ndt_resolution", ndt_resolution_);
@@ -391,6 +404,9 @@ private:
             "Downsampled input cloud to %zu data points", input_cloud->size());
 
         if (pose_published_ && !continuous_tracking_) {
+            if (publish_transformed_cloud_after_lock_) {
+                publish_transformed_scan_via_tf(input_cloud);
+            }
             return;
         }
 
@@ -404,6 +420,16 @@ private:
             "ICP fitness score: %.4f (yaw_search=%s)", icp_result.fitness,
             allow_yaw_search ? "on" : "off");
 
+        if (!manual_pose_set_) {
+            RCLCPP_WARN_THROTTLE(
+                this->get_logger(), *this->get_clock(), 8000,
+                "ICP: 请在 Qt「当前姿态」点位置+朝向后发布 /initialpose（未设置则 FAST-LIO 一直 Waiting for initial pose）");
+        } else if (icp_result.fitness >= fitness_score_thre) {
+            RCLCPP_WARN_THROTTLE(
+                this->get_logger(), *this->get_clock(), 5000,
+                "ICP fitness=%.3f > 阈值 %.3f，请调整「当前姿态」初值或先验图路径",
+                icp_result.fitness, fitness_score_thre);
+        }
         if (icp_result.converged && icp_result.fitness < fitness_score_thre) {
             converged_count++;
             initGuess = icp_result.transform;
@@ -478,6 +504,29 @@ private:
         transformed_cloud_msg.header.stamp = this->now();
         transformed_cloud_msg.header.frame_id = map_frame;
         transformed_cloud_pub_->publish(transformed_cloud_msg);
+    }
+
+    /** 重定位锁定后：用实时 map<-lidar TF，避免冻结 ICP 矩阵导致点云随机身旋转。 */
+    void publish_transformed_scan_via_tf(const pcl::PointCloud<pcl::PointXYZ>::Ptr & input_cloud)
+    {
+        try {
+            const auto timeout = tf2::durationFromSec(tf_lookup_timeout_sec_);
+            geometry_msgs::msg::TransformStamped tf_stamped = tf_buffer_->lookupTransform(
+                map_frame, lidar_frame_id_, tf2::TimePointZero, timeout);
+            const Eigen::Affine3d T = tf2::transformToEigen(tf_stamped.transform);
+            pcl::PointCloud<pcl::PointXYZ> vis = *input_cloud;
+            pcl::transformPointCloud(vis, vis, T.matrix().cast<float>());
+            sensor_msgs::msg::PointCloud2 msg;
+            pcl::toROSMsg(vis, msg);
+            msg.header.stamp = this->now();
+            msg.header.frame_id = map_frame;
+            transformed_cloud_pub_->publish(msg);
+        } catch (const tf2::TransformException & ex) {
+            RCLCPP_WARN_THROTTLE(
+                this->get_logger(), *this->get_clock(), 5000,
+                "transformed_cloud TF %s->%s failed: %s (check map->odom & odom->%s)",
+                map_frame.c_str(), lidar_frame_id_.c_str(), ex.what(), lidar_frame_id_.c_str());
+        }
     }
 
     void publish_icp_pose(const Eigen::Matrix4f & transformation_result,
@@ -576,12 +625,17 @@ private:
     double icp_coarse_yaw_step_deg_ = 3.0;
     bool publish_map_to_odom_tf_ = true;
     bool continuous_tracking_ = false;
+    bool publish_transformed_cloud_after_lock_ = true;
     int icp_result_publish_interval_ = 15;
     bool use_ndt_prefit_ = true;
     double ndt_resolution_ = 1.0;
     double ndt_step_size_ = 0.1;
     int ndt_max_iter_ = 35;
     std::string odom_frame_id_{"odom"};
+    std::string lidar_frame_id_{"livox_frame"};
+    double tf_lookup_timeout_sec_{0.25};
+    std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
+    std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
     bool have_imu_ = false;
     Eigen::Quaternionf imu_quat_{Eigen::Quaternionf::Identity()};
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_;

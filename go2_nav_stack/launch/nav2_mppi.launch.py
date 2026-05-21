@@ -21,12 +21,17 @@ def generate_launch_description():
     return LaunchDescription(
         [
             DeclareLaunchArgument("use_sim_time", default_value="false"),
+            # 可执行文件内部节点名固定为 costmap；name 须为 costmap 才能加载下方 yaml
             Node(
                 package="nav2_costmap_2d",
                 executable="nav2_costmap_2d",
-                name="local_costmap",
+                name="costmap",
                 output="screen",
                 parameters=[costmap_params, {"use_sim_time": use_sim_time}],
+                remappings=[
+                    ("costmap", "/costmap/costmap"),
+                    ("costmap_updates", "/costmap/costmap_updates"),
+                ],
             ),
             Node(
                 package="nav2_controller",
@@ -39,9 +44,9 @@ def generate_launch_description():
                     ("odom", "/state_estimation"),
                 ],
             ),
-            # 等 controller_server / costmap 进程注册后再 lifecycle activate
+            # MPPI 加载较慢；延迟启动 bringup，避免 lifecycle 服务尚未注册
             TimerAction(
-                period=12.0,
+                period=28.0,
                 actions=[
                     Node(
                         package="go2_nav_stack",

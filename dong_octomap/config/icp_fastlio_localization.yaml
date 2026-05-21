@@ -16,11 +16,15 @@ icp_node:
     # map->odom 仅由 Scan Context+配准 后 /relocalization/pose -> tf_manager 发布，运动时不再改
     publish_map_to_odom_tf: false
     continuous_tracking: false
+    # 重定位锁定后仍发布 /transformed_cloud（仅可视化，不再发 /icp_result）
+    publish_transformed_cloud_after_lock: true
     use_ndt_prefit: true
     ndt_resolution: 1.0
     ndt_step_size: 0.1
     ndt_max_iter: 35
     odom_frame_id: "odom"
+    lidar_frame_id: "livox_frame"
+    tf_lookup_timeout_sec: 0.25
     fitness_score_thre: 0.08
     converged_count_thre: 12
     max_correspondence_distance: 0.3

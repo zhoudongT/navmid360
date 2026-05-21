@@ -100,11 +100,20 @@ class TfManagerNode(Node):
         self.declare_parameter("static_base_to_imu_rpy", [0.0, 0.0, 0.0])
         self.declare_parameter("static_base_to_lidar_xyz", [0.0, 0.0, 0.15])
         self.declare_parameter("static_base_to_lidar_rpy", [0.0, 0.0, 0.0])
+        self.declare_parameter("publish_base_to_imu", False)
         self.declare_parameter("publish_odom_to_base", True)
         self.declare_parameter("publish_map_to_odom", True)
         self.declare_parameter("latch_map_to_odom", True)
-        self.declare_parameter("seed_map_to_odom_identity", True)
-        self.declare_parameter("odom_topic", "/state_estimation")
+        self.declare_parameter("seed_map_to_odom_identity", False)
+        self.declare_parameter("seed_odom_to_base_identity", True)
+        self.declare_parameter("odom_topic", "/lio_odom_raw")
+        self.declare_parameter("republish_state_estimation", True)
+        self.declare_parameter("state_estimation_topic", "/state_estimation")
+        self.declare_parameter("apply_lio_to_base_extrinsic", False)
+        self.declare_parameter("republish_odom_to_base_on_timer", False)
+        self.declare_parameter("planar_yaw_only", True)
+        self.declare_parameter("lock_odom_z", True)
+        self.declare_parameter("odom_z_fixed", 0.0)
 
         self._map_frame = self.get_parameter("map_frame").value
         self._odom_frame = self.get_parameter("odom_frame").value
@@ -119,6 +128,7 @@ class TfManagerNode(Node):
         self._odom_to_base.header.frame_id = self._odom_frame
         self._odom_to_base.child_frame_id = self._base_frame
         self._have_odom_base = False
+        self._odom_from_topic = False
 
         self._tf_pub = TransformBroadcaster(self)
         self._static_pub = StaticTransformBroadcaster(self)
@@ -129,8 +139,23 @@ class TfManagerNode(Node):
         self._buffer = Buffer()
         self._listener = TransformListener(self._buffer, self)
 
-        odom_topic = self.get_parameter("odom_topic").value
+        self._apply_lio_extrinsic = bool(
+            self.get_parameter("apply_lio_to_base_extrinsic").value
+        )
+        self._planar_yaw = bool(self.get_parameter("planar_yaw_only").value)
+        self._lock_z = bool(self.get_parameter("lock_odom_z").value)
+        self._z_fixed = float(self.get_parameter("odom_z_fixed").value)
+        self._republish_se = bool(self.get_parameter("republish_state_estimation").value)
+        self._republish_odom_timer = bool(
+            self.get_parameter("republish_odom_to_base_on_timer").value
+        )
+        self._se_topic = str(self.get_parameter("state_estimation_topic").value)
+
+        odom_topic = str(self.get_parameter("odom_topic").value)
         self.create_subscription(Odometry, odom_topic, self._on_odom, 20)
+        self._se_pub = None
+        if self._republish_se:
+            self._se_pub = self.create_publisher(Odometry, self._se_topic, 20)
         self.create_subscription(
             PoseWithCovarianceStamped,
             "/relocalization/pose",
@@ -141,33 +166,50 @@ class TfManagerNode(Node):
         self._publish_static()
         if bool(self.get_parameter("seed_map_to_odom_identity").value):
             self._seed_map_to_odom_identity()
+        else:
+            self.get_logger().info(
+                "map->odom 未发布，等待 ICP 对先验 map 重定位（/relocalization/pose）"
+            )
+        if bool(self.get_parameter("seed_odom_to_base_identity").value):
+            self._seed_odom_to_base_identity()
         period = 1.0 / max(1.0, float(self.get_parameter("publish_rate").value))
         self.create_timer(period, self._tick)
         self.get_logger().info(
-            "tf_manager_node: odom->base_link from /state_estimation (KISS); "
-            f"map->odom static from /relocalization/pose "
-            f"(T_map_odom=T_map_{self._lidar_frame}@inv(T_odom_{self._lidar_frame})); "
-            "KISS publish_odom_tf should be false"
+            f"tf_manager: odom 输入 {odom_topic} -> odom->base；"
+            + (
+                f" 同步发布 {self._se_topic}"
+                if self._republish_se
+                else ""
+            )
+            + f"；map->odom 仅重定位后"
         )
 
     def _publish_static(self) -> None:
-        imu = TransformStamped()
-        imu.header.stamp = self.get_clock().now().to_msg()
-        imu.header.frame_id = self._base_frame
-        imu.child_frame_id = "imu_link"
-        ix, iy, iz = self.get_parameter("static_base_to_imu_xyz").value
-        ir, ip, iyaw = self.get_parameter("static_base_to_imu_rpy").value
-        imu.transform.translation.x = float(ix)
-        imu.transform.translation.y = float(iy)
-        imu.transform.translation.z = float(iz)
-        q = _rpy_to_quat(float(ir), float(ip), float(iyaw))
-        imu.transform.rotation.x = q[0]
-        imu.transform.rotation.y = q[1]
-        imu.transform.rotation.z = q[2]
-        imu.transform.rotation.w = q[3]
+        stamp = self.get_clock().now().to_msg()
+        statics: list[TransformStamped] = []
+
+        if bool(self.get_parameter("publish_base_to_imu").value):
+            imu = TransformStamped()
+            imu.header.stamp = stamp
+            imu.header.frame_id = self._base_frame
+            imu.child_frame_id = "imu_link"
+            ix, iy, iz = self.get_parameter("static_base_to_imu_xyz").value
+            ir, ip, iyaw = self.get_parameter("static_base_to_imu_rpy").value
+            imu.transform.translation.x = float(ix)
+            imu.transform.translation.y = float(iy)
+            imu.transform.translation.z = float(iz)
+            q = _rpy_to_quat(float(ir), float(ip), float(iyaw))
+            imu.transform.rotation.x = q[0]
+            imu.transform.rotation.y = q[1]
+            imu.transform.rotation.z = q[2]
+            imu.transform.rotation.w = q[3]
+            statics.append(imu)
+            self.get_logger().warn(
+                "publish_base_to_imu=true：与 fastlio livox->imu 可能冲突，建议 false"
+            )
 
         lidar = TransformStamped()
-        lidar.header.stamp = imu.header.stamp
+        lidar.header.stamp = stamp
         lidar.header.frame_id = self._base_frame
         lidar.child_frame_id = self._lidar_frame
         lx, ly, lz = self.get_parameter("static_base_to_lidar_xyz").value
@@ -180,7 +222,12 @@ class TfManagerNode(Node):
         lidar.transform.rotation.y = q2[1]
         lidar.transform.rotation.z = q2[2]
         lidar.transform.rotation.w = q2[3]
-        self._static_pub.sendTransform([imu, lidar])
+        statics.append(lidar)
+        self._static_pub.sendTransform(statics)
+        self.get_logger().info(
+            f"static TF: {self._base_frame}->{self._lidar_frame} "
+            f"(imu via livox->imu from fastlio2 launch)"
+        )
 
     def _apply_map_to_odom_mat(self, t_map_odom: np.ndarray, log_prefix: str) -> None:
         pose = _mat4_to_pose(t_map_odom)
@@ -204,65 +251,163 @@ class TfManagerNode(Node):
             f"yaw={math.degrees(yaw):.1f}°"
         )
 
-    def _seed_map_to_odom_identity(self) -> None:
-        """重定位前占位：彩色点云与 odom 一致，但与先验 PCD 不会对齐。"""
-        mat = np.eye(4, dtype=np.float64)
-        self._apply_map_to_odom_mat(mat, "Seeded identity")
-        self.get_logger().warn(
-            "Prior map (/prior_map) will NOT overlap live cloud until ScanContext+ICP reloc."
-        )
-
-    def _compose_map_to_odom_from_icp(self, msg: PoseWithCovarianceStamped) -> np.ndarray:
-        """ICP 位姿为 T_map_lidar；合成 T_map_odom = T_map_lidar @ inv(T_odom_lidar)。"""
-        t_map_lidar = _pose_to_mat4(msg.pose.pose)
-        timeout = float(self.get_parameter("tf_timeout").value)
-        dur = rclpy.duration.Duration(seconds=timeout)
-        try:
-            t_odom_lidar = self._buffer.lookup_transform(
-                self._odom_frame,
-                self._lidar_frame,
-                rclpy.time.Time(),
-                timeout=dur,
-            )
-        except Exception as ex:
-            self.get_logger().warn(
-                f"reloc: TF {self._odom_frame}->{self._lidar_frame} failed ({ex}); "
-                "fallback: use ICP pose as map->odom (may misalign prior map)"
-            )
-            return t_map_lidar
-
-        t_odom_lidar_mat = _stamp_to_mat4(t_odom_lidar)
-        t_lidar_odom = np.linalg.inv(t_odom_lidar_mat)
-        t_map_odom = t_map_lidar @ t_lidar_odom
-
-        dx = float(t_odom_lidar_mat[0, 3])
-        dy = float(t_odom_lidar_mat[1, 3])
+    def _seed_odom_to_base_identity(self) -> None:
+        """重定位前占位 odom->base，保证 TF 树连通；收到 /state_estimation 后替换。"""
+        now = self.get_clock().now().to_msg()
+        self._odom_to_base.header.stamp = now
+        self._odom_to_base.transform.translation.x = 0.0
+        self._odom_to_base.transform.translation.y = 0.0
+        self._odom_to_base.transform.translation.z = 0.0
+        q = _rpy_to_quat(0.0, 0.0, 0.0)
+        self._odom_to_base.transform.rotation.x = q[0]
+        self._odom_to_base.transform.rotation.y = q[1]
+        self._odom_to_base.transform.rotation.z = q[2]
+        self._odom_to_base.transform.rotation.w = q[3]
+        self._have_odom_base = True
+        self._tf_pub.sendTransform([self._odom_to_base])
         self.get_logger().info(
-            f"reloc compose: odom->{self._lidar_frame} offset=({dx:.2f},{dy:.2f})"
+            f"已发布占位 odom->base_link（单位阵），等待 {self.get_parameter('odom_topic').value} 更新"
         )
-        return t_map_odom
+
+    def _seed_map_to_odom_identity(self) -> None:
+        """可选占位：map=odom（仅调试）。默认关闭，避免 map/odom 叠在一起。"""
+        mat = np.eye(4, dtype=np.float64)
+        self._apply_map_to_odom_mat(mat, "Seeded identity (debug)")
+        self._reloc_applied = False
+        self.get_logger().warn(
+            "seed_map_to_odom_identity=true：map 与 odom 重合，先验图不会对齐，仅调试用"
+        )
+
+    def _lookup_t_odom_sensor(self, timeout_sec: float) -> np.ndarray | None:
+        """重定位时刻的 T_odom_sensor，用于与 ICP 的 T_map_sensor 合成 map->odom。"""
+        dur = rclpy.duration.Duration(seconds=timeout_sec)
+        for child in ("livox_frame", "imu_link", self._lidar_frame):
+            try:
+                tf = self._buffer.lookup_transform(
+                    self._odom_frame,
+                    child,
+                    rclpy.time.Time(),
+                    timeout=dur,
+                )
+                mat = _stamp_to_mat4(tf)
+                self.get_logger().info(
+                    f"reloc compose: using TF {self._odom_frame}->{child} "
+                    f"xy=({mat[0,3]:.2f},{mat[1,3]:.2f})"
+                )
+                return mat
+            except Exception:
+                continue
+        try:
+            t_ob = self._buffer.lookup_transform(
+                self._odom_frame, self._base_frame, rclpy.time.Time(), timeout=dur
+            )
+            t_bl = self._buffer.lookup_transform(
+                self._base_frame, "livox_frame", rclpy.time.Time(), timeout=dur
+            )
+            mat = _stamp_to_mat4(t_ob) @ _stamp_to_mat4(t_bl)
+            self.get_logger().info("reloc compose: using odom->base->livox chain")
+            return mat
+        except Exception:
+            return None
+
+    def _compose_map_to_odom_from_icp(
+        self, msg: PoseWithCovarianceStamped
+    ) -> np.ndarray | None:
+        """ICP 位姿为 T_map_sensor；合成 T_map_odom = T_map_sensor @ inv(T_odom_sensor)。"""
+        t_map_sensor = _pose_to_mat4(msg.pose.pose)
+        timeout = float(self.get_parameter("tf_timeout").value)
+        t_odom_sensor = self._lookup_t_odom_sensor(timeout)
+        if t_odom_sensor is None:
+            self.get_logger().error(
+                "reloc: 无 odom->sensor TF。请确认 FAST-LIO 在发 /lio_odom_raw，"
+                "且重定位前 odom->base 已存在；未更新 map->odom。"
+            )
+            return None
+
+        t_sensor_odom = np.linalg.inv(t_odom_sensor)
+        return t_map_sensor @ t_sensor_odom
 
     def _on_reloc_pose(self, msg: PoseWithCovarianceStamped) -> None:
         if self._reloc_applied and bool(self.get_parameter("latch_map_to_odom").value):
             return
         t_map_odom = self._compose_map_to_odom_from_icp(msg)
+        if t_map_odom is None:
+            return
         self._apply_map_to_odom_mat(t_map_odom, "Relocalization")
+
+    def _lio_pose_to_base(self, msg: Odometry) -> Pose:
+        """LIO 位姿在 imu_link；与 imu 对齐时直接用作 odom->base，勿经 livox 链外参。"""
+        child = (msg.child_frame_id or "imu_link").strip()
+        if not self._apply_lio_extrinsic or child in (
+            self._base_frame,
+            "imu_link",
+        ):
+            return msg.pose.pose
+        dur = rclpy.duration.Duration(seconds=float(self.get_parameter("tf_timeout").value))
+        for stamp in (msg.header.stamp, rclpy.time.Time()):
+            try:
+                t_bc = self._buffer.lookup_transform(
+                    self._base_frame, child, stamp, timeout=dur
+                )
+                t = t_bc.transform.translation
+                r = t_bc.transform.rotation
+                mat_bc = np.eye(4, dtype=np.float64)
+                mat_bc[:3, :3] = _quat_to_rot(r.x, r.y, r.z, r.w)
+                mat_bc[0, 3] = t.x
+                mat_bc[1, 3] = t.y
+                mat_bc[2, 3] = t.z
+                return _mat4_to_pose(_pose_to_mat4(msg.pose.pose) @ np.linalg.inv(mat_bc))
+            except Exception:
+                continue
+        return msg.pose.pose
 
     def _on_odom(self, msg: Odometry) -> None:
         if not self.get_parameter("publish_odom_to_base").value:
             return
+        self._odom_from_topic = True
+        pose = self._lio_pose_to_base(msg)
+        if self._planar_yaw:
+            pose = _mat4_to_pose(_pose_to_mat4(pose))
+        if self._lock_z:
+            pose.position.z = self._z_fixed
         self._odom_to_base.header.stamp = msg.header.stamp
-        p = msg.pose.pose.position
-        o = msg.pose.pose.orientation
-        self._odom_to_base.transform.translation.x = p.x
-        self._odom_to_base.transform.translation.y = p.y
-        self._odom_to_base.transform.translation.z = p.z
-        self._odom_to_base.transform.rotation = o
+        self._odom_to_base.transform.translation.x = pose.position.x
+        self._odom_to_base.transform.translation.y = pose.position.y
+        self._odom_to_base.transform.translation.z = pose.position.z
+        self._odom_to_base.transform.rotation = pose.orientation
         self._have_odom_base = True
-        self._odom_to_base.header.stamp = self.get_clock().now().to_msg()
         self._tf_pub.sendTransform([self._odom_to_base])
 
+        if self._se_pub is not None:
+            out = Odometry()
+            out.header.stamp = msg.header.stamp
+            out.header.frame_id = self._odom_frame
+            out.child_frame_id = self._base_frame
+            out.pose.pose = pose
+            out.twist = msg.twist
+            self._se_pub.publish(out)
+
     def _tick(self) -> None:
+        now = self.get_clock().now().to_msg()
+        # 勿用 now() 重发 odom->base（位姿来自 ~10Hz LIO），否则 RViz 里 base_link 相对 imu_link 明显滞后
+        if (
+            self._republish_odom_timer
+            and self._have_odom_base
+            and self.get_parameter("publish_odom_to_base").value
+            and (self._odom_from_topic or bool(
+                self.get_parameter("seed_odom_to_base_identity").value
+            ))
+        ):
+            self._odom_to_base.header.stamp = now
+            self._tf_pub.sendTransform([self._odom_to_base])
+        if (
+            self._reloc_applied
+            and self._have_map_odom
+            and self.get_parameter("publish_map_to_odom").value
+        ):
+            self._map_to_odom.header.stamp = now
+            self._map_static_pub.sendTransform([self._map_to_odom])
+
         timeout = float(self.get_parameter("tf_timeout").value)
         dur = rclpy.duration.Duration(seconds=timeout)
         odom_ok = False
@@ -276,7 +421,7 @@ class TfManagerNode(Node):
             odom_ok = False
 
         need_map = bool(self.get_parameter("publish_map_to_odom").value)
-        if need_map and self._have_map_odom:
+        if need_map and self._reloc_applied and self._have_map_odom:
             try:
                 self._buffer.lookup_transform(
                     self._map_frame, self._base_frame, rclpy.time.Time(), timeout=dur

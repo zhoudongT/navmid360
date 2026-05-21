@@ -62,6 +62,11 @@ def generate_launch_description():
         default_value="8080",
         description="Port for the static web server",
     )
+    rosbridge_port_arg = DeclareLaunchArgument(
+        "rosbridge_port",
+        default_value="9090",
+        description="WebSocket 端口，须与 dong_octomap/web/main.js 一致",
+    )
     launch_rosbridge_arg = DeclareLaunchArgument(
         "launch_rosbridge",
         default_value="false",
@@ -178,6 +183,11 @@ def generate_launch_description():
         executable="rosbridge_websocket",
         name="rosbridge_websocket",
         output="screen",
+        parameters=[
+            {
+                "port": LaunchConfiguration("rosbridge_port"),
+            }
+        ],
         condition=IfCondition(LaunchConfiguration("launch_rosbridge")),
     )
 
@@ -192,6 +202,7 @@ def generate_launch_description():
         [
             map_package_arg,
             http_port_arg,
+            rosbridge_port_arg,
             launch_rosbridge_arg,
             launch_map_gui_arg,
             workspace_setup_arg,

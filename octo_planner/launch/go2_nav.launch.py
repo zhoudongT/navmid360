@@ -25,11 +25,17 @@ import yaml
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, ExecuteProcess, IncludeLaunchDescription
+from launch.actions import (
+    DeclareLaunchArgument,
+    ExecuteProcess,
+    IncludeLaunchDescription,
+    TimerAction,
+)
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 def load_nav_file_config(config_path: str) -> tuple[str, str]:
     with open(config_path, "r", encoding="utf-8") as f:
@@ -46,6 +52,9 @@ def load_nav_file_config(config_path: str) -> tuple[str, str]:
 def generate_launch_description():
     octo_planner_share = get_package_share_directory("octo_planner")
     dong_octomap_share = get_package_share_directory("dong_octomap")
+    from ament_index_python.packages import get_package_prefix
+
+    dong_prefix = get_package_prefix("dong_octomap")
     nav_params_config = os.path.join(octo_planner_share, "config", "nav_params_go2.yaml")
     _, default_map_package_dir = load_nav_file_config(nav_params_config)
     launch_localization_arg = DeclareLaunchArgument(
@@ -70,7 +79,16 @@ def generate_launch_description():
     launch_planner_arg = DeclareLaunchArgument("launch_planner", default_value="true")
     launch_web_arg = DeclareLaunchArgument("launch_web", default_value="true")
     launch_rosbridge_arg = DeclareLaunchArgument("launch_rosbridge", default_value="true")
-    web_http_port_arg = DeclareLaunchArgument("web_http_port", default_value="8080")
+    rosbridge_port_arg = DeclareLaunchArgument(
+        "rosbridge_port",
+        default_value="9090",
+        description="rosbridge WebSocket 端口；须与 dong_octomap/web/main.js 一致",
+    )
+    web_http_port_arg = DeclareLaunchArgument(
+        "web_http_port",
+        default_value="8888",
+        description="静态网页 HTTP 端口（WebSocket/rosbridge 固定 9090）",
+    )
 
     fl2_launch = os.path.join(dong_octomap_share, "launch", "fastlio2_localization.launch.py")
     localization_include = IncludeLaunchDescription(
@@ -164,9 +182,11 @@ def generate_launch_description():
     )
 
     web_root = os.path.join(dong_octomap_share, "web")
-    web_server_script = os.path.abspath(
-        os.path.join(dong_octomap_share, "..", "..", "lib", "dong_octomap", "no_cache_http_server.py")
+    web_server_script = os.path.join(
+        dong_prefix, "lib", "dong_octomap", "no_cache_http_server.py"
     )
+    if not os.path.isfile(web_server_script):
+        raise RuntimeError(f"未找到网页服务脚本: {web_server_script}")
 
     web_http_server = ExecuteProcess(
         cmd=[web_server_script, "--port", LaunchConfiguration("web_http_port"), "--directory", web_root],
@@ -174,12 +194,18 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration("launch_web")),
     )
 
-    rosbridge_node = Node(
-        package="rosbridge_server",
-        executable="rosbridge_websocket",
-        name="rosbridge_websocket",
-        output="screen",
-        condition=IfCondition(LaunchConfiguration("launch_rosbridge")),
+    # rosbridge 延迟启动 + 启动前释放端口，避免 [Errno 98] 与 launch 内重试刷屏
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    rosbridge_safe = os.path.join(repo_root, "scripts", "run_rosbridge_safe.sh")
+    rosbridge_delayed = TimerAction(
+        period=12.0,
+        actions=[
+            ExecuteProcess(
+                cmd=[rosbridge_safe, LaunchConfiguration("rosbridge_port")],
+                output="screen",
+                condition=IfCondition(LaunchConfiguration("launch_rosbridge")),
+            ),
+        ],
     )
 
     return LaunchDescription(
@@ -191,6 +217,7 @@ def generate_launch_description():
             launch_planner_arg,
             launch_web_arg,
             launch_rosbridge_arg,
+            rosbridge_port_arg,
             web_http_port_arg,
             localization_include,
             map_package_manager_node,
@@ -199,6 +226,6 @@ def generate_launch_description():
             map_viewer_gui_node,
             map_save_gui_node,
             web_http_server,
-            rosbridge_node,
+            rosbridge_delayed,
         ]
     )

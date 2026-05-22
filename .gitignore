@@ -5,7 +5,7 @@ log/
 
 # 可选：根目录由 sync 脚本克隆的 fast_lio（若与 src 内重复可保留忽略）
 /fast_lio/
-/ego-planner-swarm/
+# ego-planner-swarm 已纳入仓库（见 ego-planner-swarm/VENDORED_*）
 /src/ros2_livox_simulation/
 
 # Python cache and virtual environments
@@ -47,3 +47,4 @@ Thumbs.db
 .env
 *.local
 KISS-ICP/
+base_link:

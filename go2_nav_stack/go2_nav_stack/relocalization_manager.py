@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""重定位：更新 map->odom（运动时靠 FAST-LIO2 里程计 /state_estimation）。
+"""重定位：更新 map->odom（运动时靠 FAST-LIO2 /lio_odom_raw + tf_manager odom->base）。
 
 模式（由参数决定）：
   - manual（默认一键启动）：Qt/网页「当前姿态」点选 -> /initialpose -> ICP -> /relocalization/pose

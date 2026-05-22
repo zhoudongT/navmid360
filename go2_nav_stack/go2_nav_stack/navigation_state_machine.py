@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""导航状态机：TF 丢失时急停；局部由 Nav2 MPPI 负责避障。"""
+"""导航状态机：TF 丢失时急停；局部由 EGO 或 Nav2 MPPI 负责避障。"""
 
 from __future__ import annotations
 
@@ -42,18 +42,19 @@ class NavigationStateMachine(Node):
         if not self._tf_ok:
             self._state = "TF_LOST"
         elif ps in ("ABORTED", "REJECTED"):
-            self._state = "MPPI_FAILED"
+            self._state = "LOCAL_PLANNER_FAILED"
         elif ps == "GOAL_REACHED":
             self._state = "GOAL_REACHED"
         elif ps in (
             "MPPI_FOLLOWING",
+            "EGO_FOLLOWING",
             "PATH_READY",
             "ESCAPE_BACKUP",
             "ESCAPE_ROTATE",
         ):
             self._state = "LOCAL_NAVIGATION"
-        elif ps == "ESCAPE_FAILED":
-            self._state = "MPPI_FAILED"
+        elif ps in ("ESCAPE_FAILED", "MPPI_FAILED"):
+            self._state = "LOCAL_PLANNER_FAILED"
         elif not self._reloc_ok:
             self._state = "RELOCALIZATION"
         elif self._state == "GLOBAL_PLAN_READY":

@@ -13,10 +13,10 @@
     base_to_lidar_publisher: tf_manager_node
     lidar_to_imu_publisher: fastlio2_localization.launch
 
-    # 关键话题
+    # 关键话题（位姿以 TF map→base_link 为准；里程计主话题为 LIO 原始输出）
     topic_lio_odom_raw: /lio_odom_raw
-    # tf_manager 从 /lio_odom_raw 合成并 republish
-    topic_lio_odom_raw: /lio_odom_raw
+    topic_odom_primary: /lio_odom_raw
+    # 仅当 tf_manager republish_state_estimation:=true 时存在（默认关）
     topic_state_estimation: /state_estimation
     topic_cloud_registered: /cloud_registered
     topic_cloud_registered_map: /cloud_registered_map

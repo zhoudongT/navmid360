@@ -1,0 +1,73 @@
+# ego_planner_node 核心参数（Go2 四足，平面运动）
+# 与 ZJU advanced_param.launch.py（多旋翼 max_vel=2、dist0=0.5）对比后，针对「贴障不敢走」做了收敛。
+#
+# 关键量含义：
+#   obstacles_inflation — 栅格障碍膨胀半径 (m)，越大通道越窄
+#   optimization/dist0  — 轨迹与障碍目标安全距离 (m)，过大易判无解/急停
+#   lambda_collision    — 避障代价权重，过大则宁可慢/停也不靠近障碍
+#   grid_map/p_occ      — 占据判定阈值，越低越容易把点云标成障碍
+
+/**:
+  ros__parameters:
+    fsm/flight_type: 1
+    fsm/thresh_replan_time: 1.0
+    fsm/thresh_no_replan_meter: 0.6
+    fsm/planning_horizon: 0.8
+    fsm/planning_horizen_time: 1.5
+    fsm/emergency_time: 1.0
+    fsm/realworld_experiment: false
+    fsm/fail_safe: true
+    fsm/waypoint_num: 1
+
+    grid_map/resolution: 0.1
+    grid_map/map_size_x: 40.0
+    grid_map/map_size_y: 40.0
+    grid_map/map_size_z: 2.5
+    grid_map/local_update_range_x: 4.5
+    grid_map/local_update_range_y: 4.5
+    grid_map/local_update_range_z: 1.2
+    # 原 0.12（偏厚）；ZJU 默认 0.099。Go2 宽约 0.3–0.4 m，取 0.08
+    grid_map/obstacles_inflation: 0.08
+    grid_map/local_map_margin: 8
+    grid_map/ground_height: 0.0
+    grid_map/use_depth_filter: false
+    grid_map/p_hit: 0.65
+    grid_map/p_miss: 0.35
+    grid_map/p_min: 0.12
+    grid_map/p_max: 0.90
+    # 略提高 → 减少噪声点云误判为障碍（原 0.80）
+    grid_map/p_occ: 0.85
+    grid_map/min_ray_length: 0.15
+    grid_map/max_ray_length: 3.5
+    # 四足禁用虚拟天花板（<0 关闭）。原 0.65 会在整片 XY 上铺一层“假障碍面”，RViz 里像一整块红板
+    grid_map/virtual_ceil_height: -1.0
+    grid_map/visualization_truncate_height: 0.55
+    grid_map/show_occ_time: false
+    grid_map/pose_type: 1
+    grid_map/frame_id: map
+
+    manager/max_vel: 0.35
+    manager/max_acc: 2.0
+    manager/max_jerk: 3.0
+    manager/control_points_distance: 0.32
+    manager/feasibility_tolerance: 0.05
+    manager/planning_horizon: 0.8
+    manager/use_distinctive_trajs: false
+    manager/drone_id: 0
+
+    optimization/lambda_smooth: 1.0
+    # 原 0.5，过大时轨迹会绕很远或反复 replan
+    optimization/lambda_collision: 0.35
+    optimization/lambda_feasibility: 0.1
+    optimization/lambda_fitness: 1.0
+    # 原 0.45（接近多旋翼 0.5）；Go2 机身半径约 0.2 m，取 0.28
+    optimization/dist0: 0.28
+    optimization/swarm_clearance: 0.35
+    optimization/max_vel: 0.35
+    optimization/max_acc: 2.0
+
+    bspline/limit_vel: 0.35
+    bspline/limit_acc: 2.0
+    bspline/limit_ratio: 1.1
+
+    prediction/obj_num: 0

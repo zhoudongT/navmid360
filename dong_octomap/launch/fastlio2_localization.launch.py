@@ -110,7 +110,11 @@ def _launch_setup(context, *args, **kwargs):
     ]
 
     icp_share = get_package_share_directory("icp_relocalization")
-    rviz_cfg = os.path.join(icp_share, "rviz", "loam_livox.rviz")
+    rviz_cfg = LaunchConfiguration("rviz_config").perform(context).strip()
+    if not rviz_cfg:
+        rviz_cfg = os.path.join(icp_share, "rviz", "loam_livox.rviz")
+    elif not os.path.isfile(rviz_cfg):
+        raise RuntimeError(f"RViz 配置文件不存在: {rviz_cfg}")
     launch_rviz = LaunchConfiguration("launch_rviz").perform(context).lower() in (
         "1",
         "true",
@@ -248,6 +252,11 @@ def generate_launch_description():
                 "launch_rviz",
                 default_value="true",
                 description="是否启动 RViz（若 Ogre 崩溃可设 false，另开 rviz2）",
+            ),
+            DeclareLaunchArgument(
+                "rviz_config",
+                default_value="",
+                description="RViz2 配置 .rviz 绝对路径；空则用 icp loam_livox.rviz",
             ),
             DeclareLaunchArgument("initial_x", default_value="0.0"),
             DeclareLaunchArgument("initial_y", default_value="0.0"),

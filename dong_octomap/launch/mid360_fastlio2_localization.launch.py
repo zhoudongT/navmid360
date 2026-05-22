@@ -74,6 +74,11 @@ def generate_launch_description():
         default_value="true",
         description="是否启动 RViz",
     )
+    rviz_cfg_arg = DeclareLaunchArgument(
+        "rviz_config",
+        default_value="",
+        description="RViz2 配置路径；go2_nav_stack 一键启动会传入 rviz_go2_nav.rviz",
+    )
     ix_arg = DeclareLaunchArgument("initial_x", default_value="0.0")
     iy_arg = DeclareLaunchArgument("initial_y", default_value="0.0")
     iz_arg = DeclareLaunchArgument("initial_z", default_value="0.0")
@@ -109,6 +114,7 @@ def generate_launch_description():
             "locate_in_prior_map": LaunchConfiguration("locate_in_prior_map"),
             "imu_topic": LaunchConfiguration("imu_topic"),
             "launch_rviz": LaunchConfiguration("launch_rviz"),
+            "rviz_config": LaunchConfiguration("rviz_config"),
             "initial_x": LaunchConfiguration("initial_x"),
             "initial_y": LaunchConfiguration("initial_y"),
             "initial_z": LaunchConfiguration("initial_z"),
@@ -133,6 +139,7 @@ def generate_launch_description():
     ld.add_action(locate_arg)
     ld.add_action(imu_arg)
     ld.add_action(rviz_arg)
+    ld.add_action(rviz_cfg_arg)
     ld.add_action(ix_arg)
     ld.add_action(iy_arg)
     ld.add_action(iz_arg)

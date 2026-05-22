@@ -4,7 +4,7 @@
 controller_server:
   ros__parameters:
     use_sim_time: false
-    odom_topic: /state_estimation
+    odom_topic: /lio_odom_raw
     local_costmap: local_costmap/local_costmap
     controller_frequency: 20.0
     min_x_velocity_threshold: 0.001

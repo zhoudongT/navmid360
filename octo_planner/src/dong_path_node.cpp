@@ -311,6 +311,9 @@ private:
     rebuildPreblockedCells();
     rebuildDerivedLayers();
     rebuildPreblockedCostmap();
+    if (has_start_ && has_goal_) {
+      tryPlan();
+    }
   }
 
   void applyEditedOccupiedFromPoints(
@@ -478,6 +481,7 @@ private:
     RCLCPP_INFO(
       get_logger(), "Start set to [%.3f, %.3f, %.3f]",
       msg->point.x, msg->point.y, msg->point.z);
+    tryPlan();
   }
 
   void onGoal(const geometry_msgs::msg::PointStamped::SharedPtr msg)

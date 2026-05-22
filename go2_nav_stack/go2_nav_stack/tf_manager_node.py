@@ -72,6 +72,20 @@ def _stamp_to_mat4(stamp: TransformStamped) -> np.ndarray:
     return mat
 
 
+def _normalize_angle(a: float) -> float:
+    while a > math.pi:
+        a -= 2.0 * math.pi
+    while a < -math.pi:
+        a += 2.0 * math.pi
+    return a
+
+
+def _yaw_from_pose_quat(qx: float, qy: float, qz: float, qw: float) -> float:
+    siny = 2.0 * (qw * qz + qx * qy)
+    cosy = 1.0 - 2.0 * (qy * qy + qz * qz)
+    return math.atan2(siny, cosy)
+
+
 def _mat4_to_pose(mat: np.ndarray) -> Pose:
     pose = Pose()
     pose.position.x = float(mat[0, 3])
@@ -114,6 +128,10 @@ class TfManagerNode(Node):
         self.declare_parameter("planar_yaw_only", True)
         self.declare_parameter("lock_odom_z", True)
         self.declare_parameter("odom_z_fixed", 0.0)
+        self.declare_parameter("yaw_smooth_alpha", 0.4)
+        self.declare_parameter("yaw_smooth_alpha_spin", 0.88)
+        self.declare_parameter("spin_angular_vel_threshold", 0.45)
+        self.declare_parameter("refresh_map_to_odom_stamp", False)
 
         self._map_frame = self.get_parameter("map_frame").value
         self._odom_frame = self.get_parameter("odom_frame").value
@@ -145,6 +163,13 @@ class TfManagerNode(Node):
         self._planar_yaw = bool(self.get_parameter("planar_yaw_only").value)
         self._lock_z = bool(self.get_parameter("lock_odom_z").value)
         self._z_fixed = float(self.get_parameter("odom_z_fixed").value)
+        self._yaw_alpha = float(self.get_parameter("yaw_smooth_alpha").value)
+        self._yaw_alpha_spin = float(self.get_parameter("yaw_smooth_alpha_spin").value)
+        self._spin_wz_th = float(self.get_parameter("spin_angular_vel_threshold").value)
+        self._refresh_map_stamp = bool(
+            self.get_parameter("refresh_map_to_odom_stamp").value
+        )
+        self._yaw_filt: float | None = None
         self._republish_se = bool(self.get_parameter("republish_state_estimation").value)
         self._republish_odom_timer = bool(
             self.get_parameter("republish_odom_to_base_on_timer").value
@@ -278,31 +303,41 @@ class TfManagerNode(Node):
             "seed_map_to_odom_identity=true：map 与 odom 重合，先验图不会对齐，仅调试用"
         )
 
-    def _lookup_t_odom_sensor(self, timeout_sec: float) -> np.ndarray | None:
+    def _lookup_t_odom_sensor(
+        self, timeout_sec: float, stamp: rclpy.time.Time | None = None
+    ) -> np.ndarray | None:
         """重定位时刻的 T_odom_sensor，用于与 ICP 的 T_map_sensor 合成 map->odom。"""
         dur = rclpy.duration.Duration(seconds=timeout_sec)
+        times: list[rclpy.time.Time] = []
+        if stamp is not None and stamp.nanoseconds > 0:
+            times.append(stamp)
+        times.append(rclpy.time.Time())
         for child in ("livox_frame", "imu_link", self._lidar_frame):
-            try:
-                tf = self._buffer.lookup_transform(
-                    self._odom_frame,
-                    child,
-                    rclpy.time.Time(),
-                    timeout=dur,
-                )
-                mat = _stamp_to_mat4(tf)
-                self.get_logger().info(
-                    f"reloc compose: using TF {self._odom_frame}->{child} "
-                    f"xy=({mat[0,3]:.2f},{mat[1,3]:.2f})"
-                )
-                return mat
-            except Exception:
+            for t in times:
+                try:
+                    tf = self._buffer.lookup_transform(
+                        self._odom_frame,
+                        child,
+                        t,
+                        timeout=dur,
+                    )
+                    break
+                except Exception:
+                    tf = None
+            if tf is None:
                 continue
+            mat = _stamp_to_mat4(tf)
+            self.get_logger().info(
+                f"reloc compose: using TF {self._odom_frame}->{child} "
+                f"xy=({mat[0,3]:.2f},{mat[1,3]:.2f})"
+            )
+            return mat
         try:
             t_ob = self._buffer.lookup_transform(
-                self._odom_frame, self._base_frame, rclpy.time.Time(), timeout=dur
+                self._odom_frame, self._base_frame, times[0], timeout=dur
             )
             t_bl = self._buffer.lookup_transform(
-                self._base_frame, "livox_frame", rclpy.time.Time(), timeout=dur
+                self._base_frame, "livox_frame", times[0], timeout=dur
             )
             mat = _stamp_to_mat4(t_ob) @ _stamp_to_mat4(t_bl)
             self.get_logger().info("reloc compose: using odom->base->livox chain")
@@ -316,7 +351,8 @@ class TfManagerNode(Node):
         """ICP 位姿为 T_map_sensor；合成 T_map_odom = T_map_sensor @ inv(T_odom_sensor)。"""
         t_map_sensor = _pose_to_mat4(msg.pose.pose)
         timeout = float(self.get_parameter("tf_timeout").value)
-        t_odom_sensor = self._lookup_t_odom_sensor(timeout)
+        stamp = rclpy.time.Time.from_msg(msg.header.stamp)
+        t_odom_sensor = self._lookup_t_odom_sensor(timeout, stamp)
         if t_odom_sensor is None:
             self.get_logger().error(
                 "reloc: 无 odom->sensor TF。请确认 FAST-LIO 在发 /lio_odom_raw，"
@@ -333,7 +369,23 @@ class TfManagerNode(Node):
         t_map_odom = self._compose_map_to_odom_from_icp(msg)
         if t_map_odom is None:
             return
+        self._yaw_filt = None
         self._apply_map_to_odom_mat(t_map_odom, "Relocalization")
+
+    def _smooth_yaw(self, yaw: float, wz: float) -> float:
+        if not self._planar_yaw or self._yaw_alpha <= 0.0:
+            return yaw
+        alpha = (
+            self._yaw_alpha_spin
+            if abs(wz) >= self._spin_wz_th
+            else self._yaw_alpha
+        )
+        if self._yaw_filt is None:
+            self._yaw_filt = yaw
+            return yaw
+        dy = _normalize_angle(yaw - self._yaw_filt)
+        self._yaw_filt = _normalize_angle(self._yaw_filt + alpha * dy)
+        return self._yaw_filt
 
     def _lio_pose_to_base(self, msg: Odometry) -> Pose:
         """LIO 位姿在 imu_link；与 imu 对齐时直接用作 odom->base，勿经 livox 链外参。"""
@@ -367,7 +419,15 @@ class TfManagerNode(Node):
         self._odom_from_topic = True
         pose = self._lio_pose_to_base(msg)
         if self._planar_yaw:
-            pose = _mat4_to_pose(_pose_to_mat4(pose))
+            o = pose.orientation
+            yaw = _yaw_from_pose_quat(o.x, o.y, o.z, o.w)
+            wz = float(msg.twist.twist.angular.z)
+            yaw = self._smooth_yaw(yaw, wz)
+            qx, qy, qz, qw = _rpy_to_quat(0.0, 0.0, yaw)
+            pose.orientation.x = qx
+            pose.orientation.y = qy
+            pose.orientation.z = qz
+            pose.orientation.w = qw
         if self._lock_z:
             pose.position.z = self._z_fixed
         self._odom_to_base.header.stamp = msg.header.stamp
@@ -401,7 +461,8 @@ class TfManagerNode(Node):
             self._odom_to_base.header.stamp = now
             self._tf_pub.sendTransform([self._odom_to_base])
         if (
-            self._reloc_applied
+            self._refresh_map_stamp
+            and self._reloc_applied
             and self._have_map_odom
             and self.get_parameter("publish_map_to_odom").value
         ):

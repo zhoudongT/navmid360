@@ -12,9 +12,10 @@ tf_manager_node:
     latch_map_to_odom: true
     seed_map_to_odom_identity: false
     seed_odom_to_base_identity: true
-    # 直接用 FAST-LIO（有 10Hz）；不再依赖 planar_odom_filter
+    # 直接用 FAST-LIO（~10Hz）；planar_odom_filter 已从 bringup 移除
     odom_topic: /lio_odom_raw
-    republish_state_estimation: true
+    # 兼容旧 RViz/脚本；默认关闭，全栈以 /lio_odom_raw + TF 为准
+    republish_state_estimation: false
     state_estimation_topic: /state_estimation
     # false：odom->base 与 LIO 的 odom->imu_link 同位姿（需 base_link->imu_link 单位阵）
     apply_lio_to_base_extrinsic: false
@@ -22,7 +23,13 @@ tf_manager_node:
     planar_yaw_only: true
     lock_odom_z: true
     odom_z_fixed: 0.0
+    # 转向时略平滑 yaw，减轻 LIO 滞后；快速转圈用更大 alpha 跟上
+    yaw_smooth_alpha: 0.4
+    yaw_smooth_alpha_spin: 0.88
+    spin_angular_vel_threshold: 0.45
+    # false：map->odom 时间戳与重定位对齐，勿 50Hz 刷 now()（会与 10Hz odom->base 错位导致飘）
+    refresh_map_to_odom_stamp: false
     static_base_to_imu_xyz: [0.0, 0.0, 0.0]
     static_base_to_imu_rpy: [0.0, 0.0, 0.0]
-    static_base_to_lidar_xyz: [0.0, 0.0, 0.15]
+    static_base_to_lidar_xyz: [0.0, 0.0, 0.27]
     static_base_to_lidar_rpy: [0.0, 0.0, 0.0]

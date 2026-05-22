@@ -1,4 +1,4 @@
-"""Nav2：独立 local_costmap（RViz 显示）+ controller_server (MPPI) + bringup。"""
+"""【可选/遗留】Nav2 local_costmap + MPPI。默认 bringup 已不启动，仅调试时单独 launch。"""
 
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ def generate_launch_description():
                 parameters=[mppi_params, {"use_sim_time": use_sim_time}],
                 remappings=[
                     ("cmd_vel", "/cmd_vel"),
-                    ("odom", "/state_estimation"),
+                    ("odom", "/lio_odom_raw"),
                 ],
             ),
             # MPPI 加载较慢；延迟启动 bringup，避免 lifecycle 服务尚未注册

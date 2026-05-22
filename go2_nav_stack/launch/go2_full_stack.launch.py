@@ -1,4 +1,4 @@
-"""一键：定位 bringup（Nav2 MPPI 局部）+ 导航（网页 + 地图管理器 + 全局规划）。"""
+"""一键：定位 bringup（EGO 局部）+ 导航（网页 + 地图管理器 + 全局规划）。"""
 
 from __future__ import annotations
 
@@ -34,6 +34,11 @@ def generate_launch_description():
             DeclareLaunchArgument("web_http_port", default_value="8888"),
             DeclareLaunchArgument("rosbridge_port", default_value="9090"),
             DeclareLaunchArgument(
+                "rosbridge_delay_sec",
+                default_value="4.0",
+                description="rosbridge 延迟启动（秒）；oneclick 默认 2",
+            ),
+            DeclareLaunchArgument(
                 "reloc_auto_start",
                 default_value="false",
                 description="true=开机自动重定位；false=Qt「当前姿态」手动点击",
@@ -56,6 +61,7 @@ def generate_launch_description():
                     "launch_rosbridge": LaunchConfiguration("launch_rosbridge"),
                     "web_http_port": LaunchConfiguration("web_http_port"),
                     "rosbridge_port": LaunchConfiguration("rosbridge_port"),
+                    "rosbridge_delay_sec": LaunchConfiguration("rosbridge_delay_sec"),
                 }.items(),
             ),
         ]

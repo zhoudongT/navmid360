@@ -11,9 +11,14 @@ import numpy as np
 import rclpy
 import yaml
 from ament_index_python.packages import get_package_share_directory
-from dong_map_msgs.srv import LoadNavigationMapPackage, SaveNavigationMapPackage
+from dong_map_msgs.srv import (
+    GetNavigationMapMeta,
+    LoadNavigationMapPackage,
+    SaveNavigationMapPackage,
+)
 
 from dong_octomap.ros_client_timeouts import (
+    get_navigation_map_meta_wait_timeout_sec,
     load_navigation_map_client_spin_timeout_sec,
     save_navigation_map_client_spin_timeout_sec,
 )
@@ -201,6 +206,7 @@ class MapViewerRosNode(Node):
         super().__init__("map_viewer_gui_node")
         self.declare_parameter("tf_parent_frame", "map")
         self.declare_parameter("tf_child_frame", "base_link")
+        self.declare_parameter("planner_meta_service", "/dong_path_node/get_meta")
         self._tf_buffer = Buffer()
         self._tf_listener = TransformListener(self._tf_buffer, self, spin_thread=False)
         latched_qos = QoSProfile(
@@ -258,6 +264,25 @@ class MapViewerRosNode(Node):
         self._traversable_dirty = False
         self._latest_risk: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None
         self._risk_dirty = False
+        self._meta_client = self.create_client(
+            GetNavigationMapMeta,
+            str(self.get_parameter("planner_meta_service").value),
+        )
+
+    def is_planner_map_ready(self) -> bool:
+        if not self._meta_client.wait_for_service(timeout_sec=1.0):
+            return False
+        request = GetNavigationMapMeta.Request()
+        future = self._meta_client.call_async(request)
+        wait_sec = get_navigation_map_meta_wait_timeout_sec()
+        if wait_sec is None:
+            # 环境变量未设上限时，GUI 仍用短超时轮询，避免卡死 Qt 定时器
+            wait_sec = 3.0
+        rclpy.spin_until_future_complete(self, future, timeout_sec=wait_sec)
+        if not future.done():
+            return False
+        result = future.result()
+        return result is not None and bool(result.success)
 
     def publish_point(self, topic: str, frame_id: str, xyz: tuple[float, float, float]) -> None:
         msg = PointStamped()
@@ -594,7 +619,11 @@ class MapViewerWindow(QWidget):
         self._robot_actor: vtk.vtkProp3D | None = None
         self._latest_robot_pose: tuple[tuple[float, float, float], float] | None = None
         self._awaiting_nav_confirm = False
+        self._nav_plan_deadline: float | None = None
         self._last_path_point_count = 0
+        self._planner_map_ready = False
+        self._dong_path_layers_seen = False
+        self._last_planner_meta_check = 0.0
         self._edit_cursor_actor: vtk.vtkActor | None = None
         self._edit_cursor_edge_actor: vtk.vtkActor | None = None
         self._edit_position = np.array([0.0, 0.0, 0.0], dtype=np.float32)
@@ -610,6 +639,10 @@ class MapViewerWindow(QWidget):
         self._finish_poll_timer = QTimer(self)
         self._finish_poll_timer.setInterval(100)
         self._finish_poll_timer.timeout.connect(self._poll_worker_thread_finish)
+        self._nav_hint_timer = QTimer(self)
+        self._nav_hint_timer.setInterval(500)
+        self._nav_hint_timer.timeout.connect(self._update_navigation_hints)
+        self._nav_hint_timer.start()
         self._init_ui()
         QApplication.instance().installEventFilter(self)
         self._spin_timer = QTimer(self)
@@ -1020,12 +1053,14 @@ class MapViewerWindow(QWidget):
                 points, scale = preblocked
                 color, opacity, _label = self._LAYER_STYLE["preblocked"]
                 self._layer_data["preblocked"] = (points, scale, color, opacity)
+                self._dong_path_layers_seen = True
                 self._refresh_layers()
             traversable = self._ros_node.consume_traversable()
             if traversable is not None:
                 points, scale = traversable
                 color, opacity, _label = self._LAYER_STYLE["traversable"]
                 self._layer_data["traversable"] = (points, scale, color, opacity)
+                self._dong_path_layers_seen = True
                 self._refresh_layers()
             risk = self._ros_node.consume_risk()
             if risk is not None:
@@ -1041,6 +1076,7 @@ class MapViewerWindow(QWidget):
             self._last_path_point_count = len(path_points)
             if self._awaiting_nav_confirm and len(path_points) >= 2:
                 self._awaiting_nav_confirm = False
+                self._nav_plan_deadline = None
                 if self.auto_confirm_nav_checkbox.isChecked():
                     self._prompt_start_navigation(len(path_points))
                 else:
@@ -1054,7 +1090,8 @@ class MapViewerWindow(QWidget):
             return
         self._ros_node.publish_start_navigation(True)
         self.info_label.setText(
-            f"已发送开始导航（{self._last_path_point_count} 个路径点），Nav2 MPPI 将跟踪 /planned_path。"
+            f"已发送开始导航（{self._last_path_point_count} 个路径点），"
+            "ego_path_follower 将跟踪 /planned_path。"
         )
 
     def _on_stop_navigation_clicked(self) -> None:
@@ -1078,10 +1115,70 @@ class MapViewerWindow(QWidget):
             self._ros_node.publish_start_navigation(False)
             self.info_label.setText("仅显示规划路径，未启动路径跟踪。可稍后点击「开始导航」。")
 
-    def _set_pick_mode(self, mode: str) -> None:
-        if mode == "navigate" and self._latest_robot_pose is None:
-            self.info_label.setText("未收到机器人 TF，无法设置导航目标。")
+    def _has_pickable_layers(self) -> bool:
+        return any(actor for actor, _edge in self._layer_actors.values())
+
+    def _update_navigation_hints(self) -> None:
+        if self._worker_thread is not None and self._worker_thread.isRunning():
             return
+        now = time.monotonic()
+        if now - self._last_planner_meta_check >= 2.0:
+            self._last_planner_meta_check = now
+            self._planner_map_ready = self._ros_node.is_planner_map_ready()
+        has_tf = self._latest_robot_pose is not None
+        has_layers = self._has_pickable_layers()
+        planner_ok = self._planner_map_ready or self._dong_path_layers_seen
+        self.navigate_btn.setEnabled(has_tf and has_layers and planner_ok)
+        if has_tf and has_layers and planner_ok:
+            tip = "在 3D 视图点选目标位置与朝向；起点为当前 map→base_link 位姿。"
+        elif not has_layers:
+            tip = "请先打开/加载地图包（需占据栅格显示）再点导航。"
+        elif not planner_ok:
+            tip = "等待 dong_path_node 加载 /octomap 并显示禁行/可通行图层。"
+        else:
+            tip = "请先在「当前姿态」中设置重定位，或等待 map→base_link TF。"
+        self.navigate_btn.setToolTip(tip)
+        if self._nav_plan_deadline is not None and time.monotonic() >= self._nav_plan_deadline:
+            self._nav_plan_deadline = None
+            if self._awaiting_nav_confirm and self._last_path_point_count < 2:
+                planner_hint = (
+                    "规划节点地图未就绪。"
+                    if not self._planner_map_ready
+                    else "起/终点可能不可通行或超出地图。"
+                )
+                self.info_label.setText(
+                    f"未收到有效路径（/planned_path）。{planner_hint} "
+                    "请查看 dong_path_node 终端日志。"
+                )
+
+    def _set_pick_mode(self, mode: str) -> None:
+        if mode == "navigate":
+            if not self._has_pickable_layers():
+                QMessageBox.warning(
+                    self,
+                    "无法导航",
+                    "地图尚未加载或没有可点击的占据栅格。\n"
+                    "请先「打开地图」或等待默认地图包加载完成。",
+                )
+                return
+            if self._latest_robot_pose is None:
+                QMessageBox.warning(
+                    self,
+                    "无法导航",
+                    "未收到 map→base_link 的 TF。\n"
+                    "请先用「当前姿态」在地图上设置位姿完成重定位，"
+                    "或确认 go2_nav_stack 的 tf_manager / FAST-LIO 已运行。",
+                )
+                return
+            if not (self._planner_map_ready or self._dong_path_layers_seen):
+                QMessageBox.warning(
+                    self,
+                    "规划未就绪",
+                    "dong_path_node 尚未加载 OctoMap（/octomap）。\n"
+                    "请等待地图包自动加载完成，或点击「打开地图」后重试。\n"
+                    "若已看到蓝色禁行/绿色可通行图层，可稍等几秒再点「导航目标」。",
+                )
+                return
         self._pick_mode = mode
         self._goal_pending_position = None
         if self.edit_checkbox.isChecked():
@@ -1101,6 +1198,9 @@ class MapViewerWindow(QWidget):
 
         actor_list = [actor for actor, _edge_actor in self._layer_actors.values()]
         if not actor_list:
+            self.info_label.setText(
+                "没有可点击的地图图层。请先加载地图包并等待占据栅格显示。"
+            )
             return
 
         click_x, click_y = obj.GetEventPosition()
@@ -1202,6 +1302,7 @@ class MapViewerWindow(QWidget):
             self._update_point_actor("start", start_xyz)
             self._update_goal_visual(goal_xyz, yaw)
             self._awaiting_nav_confirm = True
+            self._nav_plan_deadline = time.monotonic() + 8.0
             self.info_label.setText(
                 f"导航目标已设置：[{goal_xyz[0]:.2f}, {goal_xyz[1]:.2f}, {goal_xyz[2]:.2f}]，"
                 f"朝向 {np.degrees(yaw):.1f}°，正在规划；完成后可确认开始导航。"
@@ -2196,20 +2297,27 @@ class MapViewerWindow(QWidget):
 
     def _load_map_package(self, package_dir: Path) -> None:
         meta_path = package_dir / "meta.yaml"
-        layers_path = package_dir / "layers.npz"
-        if not meta_path.exists() or not layers_path.exists():
-            QMessageBox.critical(self, "打开地图", "目录中缺少 meta.yaml 或 layers.npz。")
+        if not meta_path.exists():
+            QMessageBox.critical(self, "打开地图", "目录中缺少 meta.yaml。")
             return
 
         try:
             with meta_path.open("r", encoding="utf-8") as f:
                 meta = yaml.safe_load(f)
+            layers_file = str(meta.get("layers_file", "layers.npz"))
+            layers_path = package_dir / layers_file
+            if not layers_path.exists():
+                QMessageBox.critical(
+                    self, "打开地图", f"图层文件不存在：{layers_path}"
+                )
+                return
             layers = np.load(layers_path, allow_pickle=False)
         except Exception as exc:
             QMessageBox.critical(self, "打开地图", f"读取地图失败：{exc}")
             return
 
         self._layer_data.clear()
+        self._dong_path_layers_seen = False
         # 仅从包内加载占据层作为 VTK 快速底图。禁行 / 可通行 / 风险必须由 dong_path_node
         # 根据当前 OctoMap 与参数重算后从 ROS 订阅写入，否则与网页（只认话题）不一致。
         for layer_name in ("occupied",):

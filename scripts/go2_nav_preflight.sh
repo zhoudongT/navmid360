@@ -5,6 +5,14 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ROSBRIDGE_PORT="${ROSBRIDGE_PORT:-9090}"
 WEB_PORT="${WEB_PORT:-8888}"
+FAST_START="${FAST_START:-1}"
+if [[ "${FAST_START}" == "1" ]]; then
+  WEB_WAIT_SEC=2
+  ROSBRIDGE_WAIT_SEC=3
+else
+  WEB_WAIT_SEC=8
+  ROSBRIDGE_WAIT_SEC=12
+fi
 LOCK_FILE="/tmp/go2_nav_stack.lock"
 PORT_FILE="/tmp/go2_nav_stack.rosbridge_port"
 
@@ -30,11 +38,11 @@ else
 fi
 
 "${ROOT}/scripts/free_nav_ports.sh" "${WEB_PORT}" "${ROSBRIDGE_PORT}" 9091 8888 8080 8081
-if ! "${ROOT}/scripts/wait_port_free.sh" "${WEB_PORT}" 8; then
+if ! "${ROOT}/scripts/wait_port_free.sh" "${WEB_PORT}" "${WEB_WAIT_SEC}"; then
   echo "错误: 网页端口 ${WEB_PORT} 无法释放，请检查占用" >&2
   exit 1
 fi
-if ! "${ROOT}/scripts/wait_port_free.sh" "${ROSBRIDGE_PORT}" 12; then
+if ! "${ROOT}/scripts/wait_port_free.sh" "${ROSBRIDGE_PORT}" "${ROSBRIDGE_WAIT_SEC}"; then
   echo "警告: ${ROSBRIDGE_PORT} 仍被占用，改用 9091 启动 rosbridge（网页 ws 需填 ws://主机:9091）" >&2
   ROSBRIDGE_PORT=9091
   "${ROOT}/scripts/free_nav_ports.sh" 9091

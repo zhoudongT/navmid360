@@ -50,6 +50,7 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument("web_http_port", default_value="8888"),
             DeclareLaunchArgument("rosbridge_port", default_value="9090"),
+            DeclareLaunchArgument("rosbridge_delay_sec", default_value="4.0"),
             OpaqueFunction(function=_check_map_package),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(nav_launch),
@@ -60,6 +61,7 @@ def generate_launch_description():
                     "launch_rosbridge": LaunchConfiguration("launch_rosbridge"),
                     "web_http_port": LaunchConfiguration("web_http_port"),
                     "rosbridge_port": LaunchConfiguration("rosbridge_port"),
+                    "rosbridge_delay_sec": LaunchConfiguration("rosbridge_delay_sec"),
                     "launch_localization": "false",
                 }.items(),
             ),

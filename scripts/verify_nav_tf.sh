@@ -19,7 +19,7 @@ bad() { echo "  [FAIL] $*"; fail=1; }
 if ros2 topic list 2>/dev/null | grep -q '^/state_estimation$'; then
   ok "/state_estimation 存在"
   if timeout 4 ros2 topic hz /state_estimation 2>&1 | grep -q "average rate"; then
-    ok "/state_estimation 有数据（odom->base 会动，costmap 才能跟狗走）"
+    ok "/state_estimation 有数据（odom->base 会动，EGO 才能跟踪）"
   else
     bad "/state_estimation 无 hz：检查 /lio_odom_raw 与 planar_odom_filter"
   fi
@@ -57,16 +57,16 @@ else
   bad "TF odom -> base_link 不可用"
 fi
 
-if ros2 topic list 2>/dev/null | grep -q '^/costmap/costmap$'; then
-  ok "话题 /costmap/costmap（Nav2 局部滚动 costmap）"
+if ros2 topic list 2>/dev/null | grep -q '^/drone_0_planning/pos_cmd$'; then
+  ok "EGO traj_server 在发 /drone_0_planning/pos_cmd"
 else
-  bad "无 /costmap/costmap（nav2_mppi + bringup 未激活 costmap）"
+  bad "无 /drone_0_planning/pos_cmd（ego_planner_go2 未启动或未编译 ego_planner）"
 fi
 
-if timeout 3 ros2 topic echo /costmap/costmap --field header.frame_id --once 2>/dev/null | grep -q "frame_id"; then
-  ok "局部 costmap 已有数据（/local_costmap/available）"
+if timeout 3 ros2 topic hz /drone_0_cloud_registered_map 2>&1 | tail -1 | grep -qE '[0-9]'; then
+  ok "EGO 障碍点云 /drone_0_cloud_registered_map 有数据"
 else
-  bad "局部 costmap 无数据：等 nav2_controller_bringup 激活 costmap，且需 /cloud_registered + odom->base TF"
+  bad "EGO 点云无数据：需 /cloud_registered_map + map_cloud_display + 重定位"
 fi
 
 if timeout 3 ros2 run tf2_ros tf2_echo livox_frame imu_link 2>/dev/null | head -5 | grep -q "Translation"; then

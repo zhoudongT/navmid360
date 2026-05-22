@@ -1,8 +1,11 @@
-"""SingleMap：Livox + FAST-LIO2 + ICP + TF + Nav2 MPPI 局部跟踪。
+"""SingleMap：Livox + FAST-LIO2 + ICP + TF + EGO 局部规划。
 
 用法::
 
     ros2 launch go2_nav_stack bringup_humble.launch.py
+
+局部避障由 ego-planner 内部 grid_map 完成，不再启动 Nav2 MPPI / costmap。
+若需旧版 MPPI：ros2 launch go2_nav_stack nav2_mppi.launch.py（单独开）
 """
 
 from __future__ import annotations
@@ -24,7 +27,7 @@ def generate_launch_description():
     dong_share = get_package_share_directory("dong_octomap")
     cfg = os.path.join(go2_share, "config")
     frames_cfg = os.path.join(cfg, "frame_config.yaml")
-    mppi_launch = os.path.join(go2_share, "launch", "nav2_mppi.launch.py")
+    ego_launch = os.path.join(go2_share, "launch", "ego_planner_go2.launch.py")
 
     maps_root = LaunchConfiguration("maps_root")
     prior_pcd = LaunchConfiguration("prior_pcd_path")
@@ -36,6 +39,8 @@ def generate_launch_description():
         dong_share, "launch", "mid360_fastlio2_localization.launch.py"
     )
 
+    rviz_go2_cfg = os.path.join(go2_share, "config", "rviz_go2_nav.rviz")
+
     fastlio2 = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(fastlio_launch),
         condition=IfCondition(launch_fastlio),
@@ -44,21 +49,18 @@ def generate_launch_description():
             "locate_in_prior_map": "true",
             "icp_planar_constraint": "true",
             "launch_rviz": launch_rviz,
-            # base_link 与 imu_link 重合，避免经 livox 外参导致 base 滞后/偏移
+            "rviz_config": rviz_go2_cfg,
             "publish_base_tf": "true",
             "send_odom_base_tf": "false",
             "enable_transform_publisher": "false",
             "odom_output_topic": "/lio_odom_raw",
-            # Go2 导航由 tf_manager 发 odom->base，需 FAST-LIO 持续更新 /lio_odom_raw
             "prior_map_freeze_odom_without_features": "false",
-            # 转圈时放宽先验匹配，减少有效点骤降导致 odom 乱跳
             "prior_map_match_dist_sq": "81.0",
             "prior_map_min_effective_points": "12",
         }.items(),
     )
 
     stack = [
-        # 里程计由 tf_manager 订阅 /lio_odom_raw 并转发 /state_estimation（见 tf_manager.yaml）
         Node(
             package="go2_nav_stack",
             executable="map_cloud_display_node",
@@ -81,7 +83,7 @@ def generate_launch_description():
             ],
         ),
         TimerAction(
-            period=3.0,
+            period=0.5,
             actions=[
                 Node(
                     package="go2_nav_stack",
@@ -114,19 +116,7 @@ def generate_launch_description():
             output="screen",
         ),
         IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(mppi_launch),
-        ),
-        Node(
-            package="go2_nav_stack",
-            executable="local_path_display",
-            output="screen",
-            parameters=[os.path.join(cfg, "local_path_display.yaml")],
-        ),
-        Node(
-            package="go2_nav_stack",
-            executable="mppi_path_follower",
-            output="screen",
-            parameters=[os.path.join(cfg, "mppi_path_follower.yaml")],
+            PythonLaunchDescriptionSource(ego_launch),
         ),
         Node(
             package="go2_nav_stack",

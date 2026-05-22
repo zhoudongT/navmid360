@@ -25,6 +25,8 @@ LAUNCH_WEB="${LAUNCH_WEB:-true}"
 WEB_PORT="${WEB_PORT:-8888}"
 ROSBRIDGE_PORT="${ROSBRIDGE_PORT:-9090}"
 RELOC_AUTO_START="${RELOC_AUTO_START:-false}"
+FAST_START="${FAST_START:-1}"
+ROSBRIDGE_DELAY_SEC="${ROSBRIDGE_DELAY_SEC:-2.0}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -34,7 +36,7 @@ while [[ $# -gt 0 ]]; do
     --no-web) LAUNCH_WEB=false; shift ;;
     -h|--help)
       echo "用法: $0 [--no-gui] [--no-rviz] [--no-web] [--no-web-bridge]"
-      echo "环境变量: MAP_PACKAGE PRIOR_PCD LAUNCH_RVIZ LAUNCH_MAP_GUI WEB_PORT RELOC_AUTO_START"
+      echo "环境变量: MAP_PACKAGE PRIOR_PCD FAST_START ROSBRIDGE_DELAY_SEC RELOC_AUTO_START ..."
       exit 0
       ;;
     *) echo "未知参数: $1"; exit 1 ;;
@@ -92,7 +94,7 @@ fi
 
 PREFLIGHT="$ROOT/scripts/go2_nav_preflight.sh"
 if [[ -x "$PREFLIGHT" ]]; then
-  ROSBRIDGE_PORT="$ROSBRIDGE_PORT" WEB_PORT="$WEB_PORT" "$PREFLIGHT"
+  FAST_START="$FAST_START" ROSBRIDGE_PORT="$ROSBRIDGE_PORT" WEB_PORT="$WEB_PORT" "$PREFLIGHT"
   if [[ -f /tmp/go2_nav_stack.rosbridge_port ]]; then
     ROSBRIDGE_PORT="$(cat /tmp/go2_nav_stack.rosbridge_port)"
   fi
@@ -119,7 +121,8 @@ echo " Qt Manager: $LAUNCH_MAP_GUI"
 echo " RViz:       $LAUNCH_RVIZ"
 echo " 重定位:     $([ "$RELOC_AUTO_START" = true ] && echo '开机自动 ScanContext' || echo '手动 Qt「当前姿态」点击')"
 echo " 里程计:     FAST-LIO2 + ICP 先验图"
-echo " 局部规划:   Nav2 MPPI；全局路径 /planned_path，局部路径 /local_path"
+echo " 局部规划:   EGO Planner；全局 /planned_path -> /move_base_simple/goal"
+echo " 快速启动:   FAST_START=${FAST_START}  rosbridge_delay=${ROSBRIDGE_DELAY_SEC}s"
 echo "=========================================="
 
 exec ros2 launch go2_nav_stack go2_full_stack.launch.py \
@@ -131,4 +134,5 @@ exec ros2 launch go2_nav_stack go2_full_stack.launch.py \
   launch_rosbridge:="$LAUNCH_ROSBRIDGE" \
   web_http_port:="$WEB_PORT" \
   rosbridge_port:="$ROSBRIDGE_PORT" \
-  reloc_auto_start:="$RELOC_AUTO_START"
+  reloc_auto_start:="$RELOC_AUTO_START" \
+  rosbridge_delay_sec:="$ROSBRIDGE_DELAY_SEC"

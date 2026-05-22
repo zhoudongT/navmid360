@@ -84,6 +84,11 @@ def generate_launch_description():
         default_value="9090",
         description="rosbridge WebSocket 端口；须与 dong_octomap/web/main.js 一致",
     )
+    rosbridge_delay_sec_arg = DeclareLaunchArgument(
+        "rosbridge_delay_sec",
+        default_value="4.0",
+        description="rosbridge 延迟启动秒数（FAST_START=1 时 oneclick 可设为 2）",
+    )
     web_http_port_arg = DeclareLaunchArgument(
         "web_http_port",
         default_value="8888",
@@ -198,7 +203,7 @@ def generate_launch_description():
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     rosbridge_safe = os.path.join(repo_root, "scripts", "run_rosbridge_safe.sh")
     rosbridge_delayed = TimerAction(
-        period=12.0,
+        period=LaunchConfiguration("rosbridge_delay_sec"),
         actions=[
             ExecuteProcess(
                 cmd=[rosbridge_safe, LaunchConfiguration("rosbridge_port")],
@@ -218,6 +223,7 @@ def generate_launch_description():
             launch_web_arg,
             launch_rosbridge_arg,
             rosbridge_port_arg,
+            rosbridge_delay_sec_arg,
             web_http_port_arg,
             localization_include,
             map_package_manager_node,

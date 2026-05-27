@@ -40,8 +40,31 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 "reloc_auto_start",
+                default_value="true",
+                description="true=开机 Scan Context+ICP 快速自定位；false=手动或 seed",
+            ),
+            DeclareLaunchArgument(
+                "reloc_startup_delay_sec",
+                default_value="6.0",
+                description="Livox+ICP 就绪后触发 Scan Context（秒）",
+            ),
+            DeclareLaunchArgument("initial_x", default_value="0.0"),
+            DeclareLaunchArgument("initial_y", default_value="0.0"),
+            DeclareLaunchArgument("initial_z", default_value="0.0"),
+            DeclareLaunchArgument("initial_a", default_value="0.0"),
+            DeclareLaunchArgument(
+                "icp_converged_count_thre",
+                default_value="8",
+                description="ICP 连续收敛帧数，越小越快",
+            ),
+            DeclareLaunchArgument(
+                "seed_initialpose",
                 default_value="false",
-                description="true=开机自动重定位；false=Qt「当前姿态」手动点击",
+                description="已知粗位姿时仅 ICP：延时发 /initialpose",
+            ),
+            DeclareLaunchArgument(
+                "seed_initialpose_delay_sec",
+                default_value="7.0",
             ),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(bringup),
@@ -50,6 +73,20 @@ def generate_launch_description():
                     "prior_pcd_path": LaunchConfiguration("prior_pcd_path"),
                     "launch_rviz": LaunchConfiguration("launch_rviz"),
                     "reloc_auto_start": LaunchConfiguration("reloc_auto_start"),
+                    "reloc_startup_delay_sec": LaunchConfiguration(
+                        "reloc_startup_delay_sec"
+                    ),
+                    "initial_x": LaunchConfiguration("initial_x"),
+                    "initial_y": LaunchConfiguration("initial_y"),
+                    "initial_z": LaunchConfiguration("initial_z"),
+                    "initial_a": LaunchConfiguration("initial_a"),
+                    "icp_converged_count_thre": LaunchConfiguration(
+                        "icp_converged_count_thre"
+                    ),
+                    "seed_initialpose": LaunchConfiguration("seed_initialpose"),
+                    "seed_initialpose_delay_sec": LaunchConfiguration(
+                        "seed_initialpose_delay_sec"
+                    ),
                 }.items(),
             ),
             IncludeLaunchDescription(

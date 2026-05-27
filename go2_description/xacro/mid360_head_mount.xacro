@@ -1,0 +1,68 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <xacro:include filename="$(find ros2_livox_simulation)/urdf/mid360.xacro"/>
+
+  <!-- 与 src/livox_ros_driver2/config/MID360_config.json extrinsic_parameter 一致 -->
+  <xacro:property name="mid360_pitch_deg" value="19.0"/>
+  <xacro:property name="mid360_pitch_rad" value="${mid360_pitch_deg * 3.1415926 / 180.0}"/>
+  <xacro:property name="mid360_mesh_uri" value="file://$(find go2_description)/meshes/mid360.stl"/>
+  <!-- trunk 系: +X 朝狗头, +Z 朝上 -->
+  <xacro:property name="mid360_head_x" value="0.168"/>
+  <xacro:property name="mid360_head_y" value="0.0"/>
+  <xacro:property name="mid360_head_z" value="0.087"/>
+
+  <xacro:macro name="go2_mid360_head_mount" params="parent:=trunk topic:=livox/lidar">
+  <!-- 支架底板（STL 不含支架时保留） -->
+    <link name="mid360_mount_bracket">
+      <visual>
+        <origin xyz="0.022 0 0.012" rpy="0 0 0"/>
+        <geometry>
+          <box size="0.050 0.052 0.010"/>
+        </geometry>
+        <material name="mid360_mount_gray">
+          <color rgba="0.25 0.26 0.28 1.0"/>
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="0.040 0 0.030" rpy="0 ${mid360_pitch_rad} 0"/>
+        <geometry>
+          <box size="0.080 0.080 0.060"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <mass value="0.32"/>
+        <origin xyz="0.040 0 0.030" rpy="0 0 0"/>
+        <inertia ixx="1e-4" ixy="0" ixz="0" iyy="1e-4" iyz="0" izz="1e-4"/>
+      </inertial>
+    </link>
+    <joint name="mid360_mount_bracket_joint" type="fixed">
+      <parent link="${parent}"/>
+      <child link="mid360_mount_bracket"/>
+      <origin xyz="${mid360_head_x} ${mid360_head_y} ${mid360_head_z}" rpy="0 0 0"/>
+    </joint>
+
+    <gazebo reference="mid360_mount_bracket">
+      <material>
+        <ambient>0.20 0.21 0.24 1</ambient>
+        <diffuse>0.28 0.29 0.32 1</diffuse>
+        <specular>0.08 0.08 0.08 1</specular>
+      </material>
+    </gazebo>
+
+    <!-- livox_frame：TF + 插件；livox_frame_housing 显示 STL（mm，scale=0.001） -->
+    <xacro:mid360
+        name="livox_frame"
+        parent="mid360_mount_bracket"
+        topic="${topic}"
+        extrinsic_roll="0"
+        extrinsic_pitch="${mid360_pitch_deg}"
+        extrinsic_yaw="0"
+        visual_pitch_deg="${mid360_pitch_deg}"
+        visual_mesh="${mid360_mesh_uri}"
+        visual_mesh_scale="0.001 0.001 0.001">
+      <origin xyz="0.048 0 0.030" rpy="0 0 0"/>
+    </xacro:mid360>
+  </xacro:macro>
+
+</robot>

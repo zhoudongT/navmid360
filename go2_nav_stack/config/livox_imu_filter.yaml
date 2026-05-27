@@ -1,0 +1,20 @@
+# Livox Mid-360 IMU 卡尔曼滤波（供 FAST-LIO / ICP 使用滤波后话题）
+livox_imu_kalman_filter:
+  ros__parameters:
+    input_topic: "/livox/imu"
+    output_topic: "/livox/imu_filtered"
+    # 过程噪声 Q 越小越平滑；测量噪声 R 越大越信预测
+    gyro_process_noise: 1.0e-4
+    gyro_measurement_noise: 2.0e-3
+    accel_process_noise: 5.0e-4
+    accel_measurement_noise: 0.05
+    # 单帧创新门限（rad/s、m/s^2），超过则丢弃该轴更新
+    gyro_innovation_gate: 0.50
+    accel_innovation_gate: 3.0
+    max_gyro_rate_rad_s: 12.0
+    max_accel_m_s2: 40.0
+    median_window: 3
+    warmup_samples: 8
+    gyro_bias_update_rate: 0.002
+    stationary_gyro_norm: 0.08
+    publish_diagnostic: false

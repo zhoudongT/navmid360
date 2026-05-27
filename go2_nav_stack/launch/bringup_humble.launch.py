@@ -34,12 +34,15 @@ def generate_launch_description():
     launch_fastlio = LaunchConfiguration("launch_fastlio")
     launch_rviz = LaunchConfiguration("launch_rviz")
     reloc_auto_start = LaunchConfiguration("reloc_auto_start")
+    reloc_startup_delay_sec = LaunchConfiguration("reloc_startup_delay_sec")
 
     fastlio_launch = os.path.join(
         dong_share, "launch", "mid360_fastlio2_localization.launch.py"
     )
 
     rviz_go2_cfg = os.path.join(go2_share, "config", "rviz_go2_nav.rviz")
+    fastlio_go2_cfg = os.path.join(dong_share, "config", "fastlio_go2_prior_map.yaml")
+    icp_go2_cfg = os.path.join(dong_share, "config", "icp_go2_nav.yaml")
 
     fastlio2 = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(fastlio_launch),
@@ -55,9 +58,35 @@ def generate_launch_description():
             "enable_transform_publisher": "false",
             "odom_output_topic": "/lio_odom_raw",
             "prior_map_freeze_odom_without_features": "false",
-            "prior_map_match_dist_sq": "81.0",
-            "prior_map_min_effective_points": "12",
+            "prior_map_match_dist_sq": "121.0",
+            "prior_map_min_effective_points": "8",
+            "initial_x": LaunchConfiguration("initial_x"),
+            "initial_y": LaunchConfiguration("initial_y"),
+            "initial_z": LaunchConfiguration("initial_z"),
+            "initial_a": LaunchConfiguration("initial_a"),
+            "icp_converged_count_thre": LaunchConfiguration("icp_converged_count_thre"),
+            "fastlio_config_overlay": fastlio_go2_cfg,
+            "icp_overlay_config": icp_go2_cfg,
+            "imu_filter_enable": LaunchConfiguration("imu_filter_enable"),
+            "imu_topic": LaunchConfiguration("fastlio_imu_topic"),
         }.items(),
+    )
+
+    seed_initialpose = Node(
+        package="go2_nav_stack",
+        executable="sim_initialpose_publisher",
+        name="seed_initialpose_publisher",
+        output="screen",
+        condition=IfCondition(LaunchConfiguration("seed_initialpose")),
+        parameters=[
+            {
+                "delay_sec": LaunchConfiguration("seed_initialpose_delay_sec"),
+                "x": LaunchConfiguration("initial_x"),
+                "y": LaunchConfiguration("initial_y"),
+                "z": LaunchConfiguration("initial_z"),
+                "yaw": LaunchConfiguration("initial_a"),
+            }
+        ],
     )
 
     stack = [
@@ -96,6 +125,9 @@ def generate_launch_description():
                                 reloc_auto_start, value_type=bool
                             ),
                             "accept_manual_initialpose": True,
+                            "startup_delay_sec": ParameterValue(
+                                reloc_startup_delay_sec, value_type=float
+                            ),
                         },
                     ],
                 ),
@@ -134,15 +166,62 @@ def generate_launch_description():
         )
     )
     ld.add_action(DeclareLaunchArgument("launch_fastlio", default_value="true"))
+    ld.add_action(
+        DeclareLaunchArgument(
+            "imu_filter_enable",
+            default_value="true",
+            description="对 /livox/imu 卡尔曼滤波，FAST-LIO 使用 /livox/imu_filtered",
+        )
+    )
+    ld.add_action(
+        DeclareLaunchArgument(
+            "fastlio_imu_topic",
+            default_value="/livox/imu_filtered",
+            description="FAST-LIO/ICP IMU 话题；关闭滤波时请设为 /livox/imu",
+        )
+    )
     ld.add_action(DeclareLaunchArgument("launch_rviz", default_value="true"))
     ld.add_action(
         DeclareLaunchArgument(
             "reloc_auto_start",
+            default_value="true",
+            description="true=开机 Scan Context+ICP；false=手动 /initialpose 或 seed_initialpose",
+        )
+    )
+    ld.add_action(
+        DeclareLaunchArgument(
+            "reloc_startup_delay_sec",
+            default_value="6.0",
+            description="Livox+ICP 就绪后触发 Scan Context 的延时（秒）",
+        )
+    )
+    ld.add_action(DeclareLaunchArgument("initial_x", default_value="0.0"))
+    ld.add_action(DeclareLaunchArgument("initial_y", default_value="0.0"))
+    ld.add_action(DeclareLaunchArgument("initial_z", default_value="0.0"))
+    ld.add_action(DeclareLaunchArgument("initial_a", default_value="0.0"))
+    ld.add_action(
+        DeclareLaunchArgument(
+            "icp_converged_count_thre",
+            default_value="8",
+            description="ICP 连续收敛帧数，越小锁定越快（默认 8）",
+        )
+    )
+    ld.add_action(
+        DeclareLaunchArgument(
+            "seed_initialpose",
             default_value="false",
-            description="true=开机 Scan Context+ICP；false=仅 Qt「当前姿态」手动 /initialpose",
+            description="true=延时发布 /initialpose 种子（仅 ICP，不跑 Scan Context）",
+        )
+    )
+    ld.add_action(
+        DeclareLaunchArgument(
+            "seed_initialpose_delay_sec",
+            default_value="7.0",
+            description="seed_initialpose 延时（秒，应晚于 icp_node 3s 启动）",
         )
     )
     ld.add_action(fastlio2)
+    ld.add_action(seed_initialpose)
     for n in stack:
         ld.add_action(n)
     return ld

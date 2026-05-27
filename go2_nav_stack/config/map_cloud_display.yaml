@@ -5,7 +5,7 @@ map_cloud_display_node:
     target_frame: map
     tf_timeout_sec: 0.25
     require_reloc_ok: true
-    # false：用点云时间戳查 TF，转向时障碍与机体对齐；true 易在转圈时“拖影”
-    use_latest_tf: false
+    # true：map->odom 非连续高频，用 stamp 查 TF 会大量丢帧（EGO 仅 ~1Hz）；RViz 彩色图可接受轻微滞后
+    use_latest_tf: true
     max_points: 16000
     min_publish_interval_sec: 0.05

@@ -9,6 +9,7 @@ T_odom_lidar 合成 T_map_odom = T_map_lidar @ inv(T_odom_lidar)，不能把 ICP
 from __future__ import annotations
 
 import math
+import time
 
 import numpy as np
 import rclpy
@@ -118,6 +119,8 @@ class TfManagerNode(Node):
         self.declare_parameter("publish_odom_to_base", True)
         self.declare_parameter("publish_map_to_odom", True)
         self.declare_parameter("latch_map_to_odom", True)
+        self.declare_parameter("allow_icp_refine", True)
+        self.declare_parameter("icp_refine_min_interval_sec", 2.0)
         self.declare_parameter("seed_map_to_odom_identity", False)
         self.declare_parameter("seed_odom_to_base_identity", True)
         self.declare_parameter("odom_topic", "/lio_odom_raw")
@@ -132,6 +135,10 @@ class TfManagerNode(Node):
         self.declare_parameter("yaw_smooth_alpha_spin", 0.88)
         self.declare_parameter("spin_angular_vel_threshold", 0.45)
         self.declare_parameter("refresh_map_to_odom_stamp", False)
+        self.declare_parameter("spin_block_reloc_wz", 0.55)
+        self.declare_parameter("spin_reloc_settle_sec", 2.0)
+        self.declare_parameter("icp_refine_max_yaw_deg", 25.0)
+        self.declare_parameter("icp_refine_max_xy_m", 0.6)
 
         self._map_frame = self.get_parameter("map_frame").value
         self._odom_frame = self.get_parameter("odom_frame").value
@@ -141,7 +148,9 @@ class TfManagerNode(Node):
         self._map_to_odom.header.frame_id = self._map_frame
         self._map_to_odom.child_frame_id = self._odom_frame
         self._have_map_odom = False
+        self._t_map_odom_mat: np.ndarray | None = None
         self._reloc_applied = False
+        self._last_icp_refine_time = 0.0
         self._odom_to_base = TransformStamped()
         self._odom_to_base.header.frame_id = self._odom_frame
         self._odom_to_base.child_frame_id = self._base_frame
@@ -170,6 +179,16 @@ class TfManagerNode(Node):
             self.get_parameter("refresh_map_to_odom_stamp").value
         )
         self._yaw_filt: float | None = None
+        self._was_spinning = False
+        self._last_wz = 0.0
+        self._last_odom_mono = 0.0
+        self._spin_settle_until = 0.0
+        self._spin_block_wz = float(self.get_parameter("spin_block_reloc_wz").value)
+        self._spin_settle_sec = float(self.get_parameter("spin_reloc_settle_sec").value)
+        self._refine_max_yaw = math.radians(
+            float(self.get_parameter("icp_refine_max_yaw_deg").value)
+        )
+        self._refine_max_xy = float(self.get_parameter("icp_refine_max_xy_m").value)
         self._republish_se = bool(self.get_parameter("republish_state_estimation").value)
         self._republish_odom_timer = bool(
             self.get_parameter("republish_odom_to_base_on_timer").value
@@ -202,7 +221,7 @@ class TfManagerNode(Node):
         self.get_logger().info(
             f"tf_manager: odom 输入 {odom_topic} -> odom->base；"
             + (
-                f" 同步发布 {self._se_topic}"
+                f" 同步发布 map 系 {self._se_topic}（~lio 频率）"
                 if self._republish_se
                 else ""
             )
@@ -264,6 +283,7 @@ class TfManagerNode(Node):
         self._map_to_odom.transform.translation.z = pose.position.z
         self._map_to_odom.transform.rotation = pose.orientation
         self._have_map_odom = True
+        self._t_map_odom_mat = t_map_odom.copy()
         self._reloc_applied = True
         # map->odom 用静态 TF，避免 50Hz 刷时间戳导致 RViz 里 base_link 抖动
         self._map_static_pub.sendTransform([self._map_to_odom])
@@ -363,28 +383,82 @@ class TfManagerNode(Node):
         t_sensor_odom = np.linalg.inv(t_odom_sensor)
         return t_map_sensor @ t_sensor_odom
 
+    def _is_spin_protected(self) -> bool:
+        now = time.monotonic()
+        if now < self._spin_settle_until:
+            return True
+        if now - self._last_odom_mono > 0.6:
+            return False
+        if abs(self._last_wz) >= self._spin_block_wz:
+            self._spin_settle_until = now + self._spin_settle_sec
+            return True
+        return False
+
+    def _refine_jump_ok(self, t_map_odom: np.ndarray) -> bool:
+        if self._t_map_odom_mat is None:
+            return True
+        t_old = self._t_map_odom_mat
+        dx = float(t_map_odom[0, 3] - t_old[0, 3])
+        dy = float(t_map_odom[1, 3] - t_old[1, 3])
+        if math.hypot(dx, dy) > self._refine_max_xy:
+            return False
+        yaw_old = math.atan2(t_old[1, 0], t_old[0, 0])
+        yaw_new = math.atan2(t_map_odom[1, 0], t_map_odom[0, 0])
+        return abs(_normalize_angle(yaw_new - yaw_old)) <= self._refine_max_yaw
+
     def _on_reloc_pose(self, msg: PoseWithCovarianceStamped) -> None:
-        if self._reloc_applied and bool(self.get_parameter("latch_map_to_odom").value):
+        latch = bool(self.get_parameter("latch_map_to_odom").value)
+        allow_refine = bool(self.get_parameter("allow_icp_refine").value)
+        if self._reloc_applied and latch and not allow_refine:
             return
+        if self._reloc_applied and self._is_spin_protected():
+            self.get_logger().warn(
+                "转圈中/刚停转：跳过 map->odom ICP 更新，避免 360° 后定位飘",
+                throttle_duration_sec=2.0,
+            )
+            return
+        if self._reloc_applied and latch and allow_refine:
+            min_iv = float(self.get_parameter("icp_refine_min_interval_sec").value)
+            now = self.get_clock().now().nanoseconds * 1e-9
+            if now - self._last_icp_refine_time < min_iv:
+                return
+            self._last_icp_refine_time = now
         t_map_odom = self._compose_map_to_odom_from_icp(msg)
         if t_map_odom is None:
             return
+        if self._reloc_applied and not self._refine_jump_ok(t_map_odom):
+            self.get_logger().warn(
+                "ICP refine 跳变过大（转圈误匹配），已拒绝更新 map->odom",
+                throttle_duration_sec=2.0,
+            )
+            return
         self._yaw_filt = None
-        self._apply_map_to_odom_mat(t_map_odom, "Relocalization")
+        prefix = "ICP refine" if self._reloc_applied else "Relocalization"
+        self._apply_map_to_odom_mat(t_map_odom, prefix)
+        if prefix == "ICP refine":
+            self.get_logger().debug(
+                f"ICP refine map->odom applied (interval>="
+                f"{float(self.get_parameter('icp_refine_min_interval_sec').value):.1f}s)"
+            )
 
     def _smooth_yaw(self, yaw: float, wz: float) -> float:
         if not self._planar_yaw or self._yaw_alpha <= 0.0:
             return yaw
-        alpha = (
-            self._yaw_alpha_spin
-            if abs(wz) >= self._spin_wz_th
-            else self._yaw_alpha
-        )
+        spinning = abs(wz) >= self._spin_wz_th
+        # 转圈时不平滑：避免 /transformed_cloud 与 map 系点云“跟着狗转、停转才慢慢回正”
+        if spinning:
+            self._was_spinning = True
+            self._yaw_filt = yaw
+            return yaw
+        if self._was_spinning:
+            self._was_spinning = False
+            self._yaw_filt = yaw
+            return yaw
         if self._yaw_filt is None:
             self._yaw_filt = yaw
             return yaw
         dy = _normalize_angle(yaw - self._yaw_filt)
-        self._yaw_filt = _normalize_angle(self._yaw_filt + alpha * dy)
+        self._yaw_filt = _normalize_angle(self._yaw_filt + self._yaw_alpha * dy)
         return self._yaw_filt
 
     def _lio_pose_to_base(self, msg: Odometry) -> Pose:
@@ -413,10 +487,25 @@ class TfManagerNode(Node):
                 continue
         return msg.pose.pose
 
+    def _publish_map_state_estimation(self, msg: Odometry, pose_odom_base: Pose) -> None:
+        """T_map_base = T_map_odom @ T_odom_base，供 EGO grid_map（map 系，~10Hz）。"""
+        if self._se_pub is None or not self._have_map_odom or self._t_map_odom_mat is None:
+            return
+        t_map_base = self._t_map_odom_mat @ _pose_to_mat4(pose_odom_base)
+        out = Odometry()
+        out.header.stamp = msg.header.stamp
+        out.header.frame_id = self._map_frame
+        out.child_frame_id = self._base_frame
+        out.pose.pose = _mat4_to_pose(t_map_base)
+        out.twist = msg.twist
+        self._se_pub.publish(out)
+
     def _on_odom(self, msg: Odometry) -> None:
         if not self.get_parameter("publish_odom_to_base").value:
             return
         self._odom_from_topic = True
+        self._last_wz = float(msg.twist.twist.angular.z)
+        self._last_odom_mono = time.monotonic()
         pose = self._lio_pose_to_base(msg)
         if self._planar_yaw:
             o = pose.orientation
@@ -439,13 +528,7 @@ class TfManagerNode(Node):
         self._tf_pub.sendTransform([self._odom_to_base])
 
         if self._se_pub is not None:
-            out = Odometry()
-            out.header.stamp = msg.header.stamp
-            out.header.frame_id = self._odom_frame
-            out.child_frame_id = self._base_frame
-            out.pose.pose = pose
-            out.twist = msg.twist
-            self._se_pub.publish(out)
+            self._publish_map_state_estimation(msg, pose)
 
     def _tick(self) -> None:
         now = self.get_clock().now().to_msg()

@@ -1,0 +1,49 @@
+<?xml version="1.0"?>
+<robot name="go2_mid360_sim" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <xacro:include filename="$(find ros2_livox_simulation)/urdf/mid360.xacro"/>
+  <xacro:include filename="$(find dong_gazebo_sim)/urdf/go2_mid360_sim.gazebo.xacro"/>
+
+  <material name="body_gray">
+    <color rgba="0.55 0.58 0.62 1.0"/>
+  </material>
+
+  <link name="base_link">
+    <inertial>
+      <mass value="12.0"/>
+      <origin xyz="0 0 0.05" rpy="0 0 0"/>
+      <inertia ixx="0.08" ixy="0" ixz="0" iyy="0.25" iyz="0" izz="0.27"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0.05" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.42 0.22 0.10"/>
+      </geometry>
+      <material name="body_gray"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.05" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.42 0.22 0.10"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="imu_link">
+    <inertial>
+      <mass value="0.01"/>
+      <inertia ixx="1e-6" ixy="0" ixz="0" iyy="1e-6" iyz="0" izz="1e-6"/>
+    </inertial>
+  </link>
+  <joint name="imu_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="imu_link"/>
+    <!-- 与 dong_octomap/config/mid360_go2_up.yaml 中雷达相对 IMU 大致一致 -->
+    <origin xyz="-0.011 -0.02329 0.092" rpy="0 0 0"/>
+  </joint>
+
+  <!-- 狗头 Mid-360：插件内 extrinsic pitch=19°（与 MID360_config.json 一致） -->
+  <xacro:include filename="$(find go2_description)/xacro/mid360_head_mount.xacro"/>
+  <xacro:go2_mid360_head_mount parent="base_link" topic="livox/lidar" head_x="0.20" head_z="0.065"/>
+
+</robot>

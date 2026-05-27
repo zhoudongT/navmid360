@@ -1,0 +1,12 @@
+# Go2 先验图定位：快速移动 / 连续旋转时提高特征匹配容忍度
+/**:
+  ros__parameters:
+    max_iteration: 5
+    point_filter_num: 1
+    filter_size_surf: 0.4
+    prior_map_match_dist_sq: 121.0
+    prior_map_min_effective_points: 8
+    mapping:
+      # 快速转圈时略增信 IMU，减轻 odom 航向积分漂移
+      acc_cov: 0.12
+      gyr_cov: 0.10

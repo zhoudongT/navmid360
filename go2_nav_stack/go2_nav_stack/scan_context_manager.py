@@ -8,6 +8,7 @@ from typing import List
 
 import numpy as np
 import rclpy
+from livox_ros_driver2.msg import CustomMsg
 from rclpy.node import Node
 from sensor_msgs.msg import PointCloud2
 from sensor_msgs_py import point_cloud2
@@ -29,16 +30,23 @@ class ScanContextManager(Node):
         self.declare_parameter("search_scope", "whole_building")
         self.declare_parameter("top_k", 10)
         self.declare_parameter("max_ring_distance", 0.35)
+        self.declare_parameter("lidar_topic", "/livox/lidar")
+        self.declare_parameter("registered_cloud_topic", "/cloud_registered")
+        self.declare_parameter("min_query_points", 50)
         self._cloud_buf: List[np.ndarray] = []
         self._max_frames = 30
         self._entries: list = []
         self._load_db()
-        self.create_subscription(PointCloud2, "/cloud_registered", self._on_cloud, 10)
+        lidar_topic = str(self.get_parameter("lidar_topic").value)
+        reg_topic = str(self.get_parameter("registered_cloud_topic").value)
+        # ICP 锁定前 FAST-LIO 不发布 /cloud_registered，粗定位须用原始 Livox
+        self.create_subscription(CustomMsg, lidar_topic, self._on_livox, 10)
+        self.create_subscription(PointCloud2, reg_topic, self._on_cloud, 10)
         self._result_pub = self.create_publisher(String, "/scan_context/last_query", 10)
         self.create_service(Trigger, "~/query", self._on_query)
         self.get_logger().info(
-            f"scan_context_manager: single_db entries={len(self._entries)} "
-            f"scope={self.get_parameter('search_scope').value}"
+            f"scan_context_manager: entries={len(self._entries)} "
+            f"lidar={lidar_topic} registered={reg_topic}"
         )
 
     def _db_path(self) -> Path:
@@ -56,14 +64,26 @@ class ScanContextManager(Node):
     def _load_db(self) -> None:
         self._entries = load_db(self._db_path())
 
+    def _push_scan(self, pts: np.ndarray) -> None:
+        if pts.size == 0:
+            return
+        self._cloud_buf.append(pts.astype(np.float32, copy=False))
+        if len(self._cloud_buf) > self._max_frames:
+            self._cloud_buf.pop(0)
+
+    def _on_livox(self, msg: CustomMsg) -> None:
+        n = int(msg.point_num)
+        if n <= 0:
+            return
+        pts = np.array([(p.x, p.y, p.z) for p in msg.points[:n]], dtype=np.float32)
+        self._push_scan(pts)
+
     def _on_cloud(self, msg: PointCloud2) -> None:
         pts = []
         for p in point_cloud2.read_points(msg, field_names=("x", "y", "z"), skip_nans=True):
             pts.append((p[0], p[1], p[2]))
         if pts:
-            self._cloud_buf.append(np.array(pts, dtype=np.float32))
-            if len(self._cloud_buf) > self._max_frames:
-                self._cloud_buf.pop(0)
+            self._push_scan(np.array(pts, dtype=np.float32))
 
     def _aggregate_xy(self) -> np.ndarray:
         if not self._cloud_buf:
@@ -73,9 +93,10 @@ class ScanContextManager(Node):
 
     def _on_query(self, _req: Trigger.Request, res: Trigger.Response) -> Trigger.Response:
         xy = self._aggregate_xy()
-        if xy.shape[0] < 50:
+        min_pts = int(self.get_parameter("min_query_points").value)
+        if xy.shape[0] < min_pts:
             res.success = False
-            res.message = "not enough points, move lidar or wait"
+            res.message = f"not enough points ({xy.shape[0]}<{min_pts}), wait for Livox"
             return res
         if not self._entries:
             res.success = False

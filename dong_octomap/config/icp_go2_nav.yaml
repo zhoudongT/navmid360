@@ -1,0 +1,11 @@
+# Go2 导航：ICP 持续跟踪，周期性修正 map->odom（配合 tf_manager allow_icp_refine）
+icp_node:
+  ros__parameters:
+    # 导航时运动/转圈容易出现几何退化（尤其 180° 对称场景），continuous_tracking 可能造成 map->odom 错误跳变。
+    # 建议只在重定位触发时发布一次可靠解，由 tf_manager 更新 map->odom；运动中不持续追踪。
+    continuous_tracking: false
+    # 连续追踪关闭后该参数不再生效，但保留以便你需要时再开
+    icp_result_publish_interval: 12
+    publish_transformed_cloud_after_lock: true
+    # 转圈时 coarse yaw search 容易在对称环境选错候选 yaw；用于导航更稳的做法是关闭。
+    icp_coarse_yaw_search_enable: false

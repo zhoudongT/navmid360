@@ -1,0 +1,11 @@
+# 平面方块 Mid-360：pitch=19° 在 Gazebo 插件内；FAST-LIO 仅平移（与 go2 头载一致）
+/**:
+  ros__parameters:
+    mapping:
+      extrinsic_est_en: false
+      extrinsic_T: [0.20, 0.0, 0.078]
+      extrinsic_R: [1.0, 0.0, 0.0,
+                    0.0, 1.0, 0.0,
+                    0.0, 0.0, 1.0]
+    preprocess:
+      blind: 0.5

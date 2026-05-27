@@ -434,7 +434,7 @@ private:
             converged_count++;
             initGuess = icp_result.transform;
             if (converged_count < converged_count_thre) {
-                publish_transformed_scan(input_cloud, initGuess);
+                publish_transformed_cloud_best(input_cloud, initGuess);
                 target_cloud_msg.header.stamp = this->now();
                 map_pub_->publish(target_cloud_msg);
                 return;
@@ -444,7 +444,7 @@ private:
                     this->get_logger(), *this->get_clock(), 5000,
                     "ICP aligned (fitness=%.3f). Set 2D Pose in RViz to start localization.",
                     icp_result.fitness);
-                publish_transformed_scan(input_cloud, initGuess);
+                publish_transformed_cloud_best(input_cloud, initGuess);
                 return;
             }
             if (continuous_tracking_) {
@@ -452,7 +452,7 @@ private:
                 if (!pose_published_ || (scan_frame_count_ % interval == 0)) {
                     publish_icp_pose(initGuess, input_cloud, !pose_published_);
                 }
-                publish_transformed_scan(input_cloud, initGuess);
+                publish_transformed_cloud_best(input_cloud, initGuess);
                 return;
             }
             RCLCPP_INFO(
@@ -463,7 +463,7 @@ private:
         }
         converged_count = 0;
         initGuess = icp_result.converged ? icp_result.transform : initGuess;
-        publish_transformed_scan(input_cloud, constrain_planar(initGuess));
+        publish_transformed_cloud_best(input_cloud, constrain_planar(initGuess));
         target_cloud_msg.header.stamp = this->now();
         map_pub_->publish(target_cloud_msg);
     }
@@ -506,8 +506,8 @@ private:
         transformed_cloud_pub_->publish(transformed_cloud_msg);
     }
 
-    /** 重定位锁定后：用实时 map<-lidar TF，避免冻结 ICP 矩阵导致点云随机身旋转。 */
-    void publish_transformed_scan_via_tf(const pcl::PointCloud<pcl::PointXYZ>::Ptr & input_cloud)
+    /** 用实时 map<-lidar TF，避免 ICP initGuess 滞后导致点云随机身转、停转才慢慢回正。 */
+    bool publish_transformed_scan_via_tf(const pcl::PointCloud<pcl::PointXYZ>::Ptr & input_cloud)
     {
         try {
             const auto timeout = tf2::durationFromSec(tf_lookup_timeout_sec_);
@@ -521,12 +521,24 @@ private:
             msg.header.stamp = this->now();
             msg.header.frame_id = map_frame;
             transformed_cloud_pub_->publish(msg);
+            return true;
         } catch (const tf2::TransformException & ex) {
             RCLCPP_WARN_THROTTLE(
                 this->get_logger(), *this->get_clock(), 5000,
                 "transformed_cloud TF %s->%s failed: %s (check map->odom & odom->%s)",
                 map_frame.c_str(), lidar_frame_id_.c_str(), ex.what(), lidar_frame_id_.c_str());
+            return false;
         }
+    }
+
+    void publish_transformed_cloud_best(
+        const pcl::PointCloud<pcl::PointXYZ>::Ptr & input_cloud,
+        const Eigen::Matrix4f & fallback_transform)
+    {
+        if (publish_transformed_cloud_after_lock_ && publish_transformed_scan_via_tf(input_cloud)) {
+            return;
+        }
+        publish_transformed_scan(input_cloud, fallback_transform);
     }
 
     void publish_icp_pose(const Eigen::Matrix4f & transformation_result,

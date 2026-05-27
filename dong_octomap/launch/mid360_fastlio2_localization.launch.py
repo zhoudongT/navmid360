@@ -28,8 +28,10 @@ from ament_index_python.packages import get_package_share_directory
 from ament_index_python.packages import PackageNotFoundError
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node
 
 
 def generate_launch_description():
@@ -64,10 +66,15 @@ def generate_launch_description():
         default_value="true",
         description="true=先验图重定位（导航）；false=建图",
     )
+    imu_filter_arg = DeclareLaunchArgument(
+        "imu_filter_enable",
+        default_value="true",
+        description="是否对 /livox/imu 做卡尔曼滤波并发布 /livox/imu_filtered",
+    )
     imu_arg = DeclareLaunchArgument(
         "imu_topic",
-        default_value="/livox/imu",
-        description="IMU 话题",
+        default_value="/livox/imu_filtered",
+        description="FAST-LIO / ICP 使用的 IMU 话题（滤波开启时默认 /livox/imu_filtered）",
     )
     rviz_arg = DeclareLaunchArgument(
         "launch_rviz",
@@ -103,9 +110,38 @@ def generate_launch_description():
         default_value="15",
         description="至少多少有效点才更新 LIO 状态",
     )
+    conv_arg = DeclareLaunchArgument(
+        "converged_count_thre",
+        default_value="12",
+        description="ICP 连续收敛帧数阈值",
+    )
+    fl_overlay_arg = DeclareLaunchArgument(
+        "fastlio_config_overlay",
+        default_value="",
+        description="FAST-LIO 额外 YAML overlay",
+    )
+    icp_overlay_arg = DeclareLaunchArgument(
+        "icp_overlay_config",
+        default_value="",
+        description="icp_node 额外 YAML overlay",
+    )
+
+    try:
+        go2_share = get_package_share_directory("go2_nav_stack")
+        imu_filter_cfg = os.path.join(go2_share, "config", "livox_imu_filter.yaml")
+    except PackageNotFoundError:
+        imu_filter_cfg = ""
 
     livox = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(livox_driver),
+    )
+    imu_filter_node = Node(
+        package="go2_nav_stack",
+        executable="livox_imu_kalman_filter",
+        name="livox_imu_kalman_filter",
+        output="screen",
+        condition=IfCondition(LaunchConfiguration("imu_filter_enable")),
+        parameters=[imu_filter_cfg] if imu_filter_cfg else [],
     )
     fl2 = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(fl2_launch),
@@ -131,12 +167,16 @@ def generate_launch_description():
             "prior_map_min_effective_points": LaunchConfiguration(
                 "prior_map_min_effective_points"
             ),
+            "converged_count_thre": LaunchConfiguration("converged_count_thre"),
+            "fastlio_config_overlay": LaunchConfiguration("fastlio_config_overlay"),
+            "icp_overlay_config": LaunchConfiguration("icp_overlay_config"),
         }.items(),
     )
 
     ld = LaunchDescription()
     ld.add_action(prior_arg)
     ld.add_action(locate_arg)
+    ld.add_action(imu_filter_arg)
     ld.add_action(imu_arg)
     ld.add_action(rviz_arg)
     ld.add_action(rviz_cfg_arg)
@@ -152,6 +192,10 @@ def generate_launch_description():
     ld.add_action(freeze_odom_arg)
     ld.add_action(match_dist_arg)
     ld.add_action(min_eff_arg)
+    ld.add_action(conv_arg)
+    ld.add_action(fl_overlay_arg)
+    ld.add_action(icp_overlay_arg)
     ld.add_action(livox)
+    ld.add_action(imu_filter_node)
     ld.add_action(fl2)
     return ld

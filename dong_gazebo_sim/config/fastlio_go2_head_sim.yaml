@@ -1,0 +1,12 @@
+# Go2 狗头 Mid-360 Gazebo：pitch=19° 已在 Livox 仿真插件内旋转点云（同 MID360_config.json）
+# FAST-LIO 仅保留支架平移，勿在 extrinsic_R 中再次旋转（否则 No Effective Points / VoxelGrid 溢出）
+/**:
+  ros__parameters:
+    mapping:
+      extrinsic_est_en: false
+      extrinsic_T: [0.168, 0.0, 0.093]
+      extrinsic_R: [1.0, 0.0, 0.0,
+                    0.0, 1.0, 0.0,
+                    0.0, 0.0, 1.0]
+    preprocess:
+      blind: 0.5

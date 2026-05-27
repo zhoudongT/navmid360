@@ -50,8 +50,8 @@
  
 
     <!-- joint limits -->
-    <xacro:property name="damping" value="0.0"/>
-    <xacro:property name="friction" value="0.0"/>
+    <xacro:property name="damping" value="0.01"/>
+    <xacro:property name="friction" value="0.2"/>
     <xacro:property name="hip_position_max" value="1.0472"/>
     <xacro:property name="hip_position_min" value="-1.0472"/>
     <xacro:property name="hip_velocity_max" value="30.1"/>
@@ -117,5 +117,7 @@
 
     <!-- foot -->
     <xacro:property name="foot_mass" value="0.06"/>
+
+    <!-- 站立角已按腿写入 robot_*.xacro 的 xacro:leg stand_* 参数（见 walk-these-ways-go2） -->
 
 </robot>

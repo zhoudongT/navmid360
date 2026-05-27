@@ -47,6 +47,7 @@
 #include "IMU_Processing.hpp"
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav_msgs/msg/path.hpp>
+#include <std_msgs/msg/int32.hpp>
 #include <visualization_msgs/msg/marker.hpp>
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/point_cloud.h>
@@ -208,7 +209,9 @@ void h_share_model(state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_
 
         auto &points_near = Nearest_Points[i];
 
-        if (ekfom_data.converge)
+        // 先验图模式：快速转圈时 EKF 迭代未收敛也会跳过近邻搜索，导致 No Effective Points 雪崩
+        const bool search_nearest = ekfom_data.converge || locate_in_prior_map;
+        if (search_nearest)
         {
             /** Find the closest surfaces in the map **/
             ikdtree.Nearest_Search(point_world, NUM_MATCH_POINTS, points_near, pointSearchSqDis);
@@ -223,12 +226,14 @@ void h_share_model(state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_
         VF(4)
         pabcd;
         point_selected_surf[i] = false;
-        if (esti_plane(pabcd, points_near, 0.1f))
+        const float plane_thresh = locate_in_prior_map ? 0.15f : 0.1f;
+        const float score_min = locate_in_prior_map ? 0.82f : 0.9f;
+        if (esti_plane(pabcd, points_near, plane_thresh))
         {
             float pd2 = pabcd(0) * point_world.x + pabcd(1) * point_world.y + pabcd(2) * point_world.z + pabcd(3);
             float s = 1 - 0.9 * fabs(pd2) / sqrt(p_body.norm());
 
-            if (s > 0.9)
+            if (s > score_min)
             {
                 point_selected_surf[i] = true;
                 normvec->points[i].x = pabcd(0);
@@ -258,7 +263,13 @@ void h_share_model(state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_
         ekfom_data.valid = false;
         if (!(locate_in_prior_map && prior_map_freeze_odom_without_features && prior_map_has_good_lidar_fix))
         {
-            std::cerr << "No Effective Points!" << std::endl;
+            static int no_eff_log_count = 0;
+            if (++no_eff_log_count % 50 == 1)
+            {
+                std::cerr << "No Effective Points! (throttled, prior_map="
+                          << locate_in_prior_map << " feats_down=" << feats_down_size
+                          << ")" << std::endl;
+            }
         }
         return;
     }
@@ -527,6 +538,7 @@ private:
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubIkdTree_;
     rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pubOdomAftMapped_;
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pubPath_;
+    rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr eff_feat_pub_;
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr sub_imu_;
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_pcl_pc_;
     rclcpp::Subscription<livox_ros_driver2::msg::CustomMsg>::SharedPtr sub_pcl_livox_;
@@ -1336,6 +1348,24 @@ private:
                     last_good_state_point = state_point;
                     prior_map_has_good_lidar_fix = true;
                 }
+                else if (locate_in_prior_map && !prior_map_freeze_odom_without_features &&
+                         effct_feat_num >= prior_map_min_effective_points)
+                {
+                    last_good_state_point = state_point;
+                    prior_map_has_good_lidar_fix = true;
+                }
+            }
+
+            if (locate_in_prior_map)
+            {
+                if (!eff_feat_pub_)
+                {
+                    eff_feat_pub_ = this->create_publisher<std_msgs::msg::Int32>(
+                        "/fastlio/effective_points", 10);
+                }
+                std_msgs::msg::Int32 eff_msg;
+                eff_msg.data = effct_feat_num;
+                eff_feat_pub_->publish(eff_msg);
             }
 
             if (hold_odom_frozen)
@@ -1433,8 +1463,11 @@ private:
 
     void initial_pose_cbk(const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg)
     {
+        const bool weak_lio_match =
+            locate_in_prior_map && prior_ikdtree_built &&
+            last_frame_effct_feat_num < prior_map_min_effective_points;
         if (initial_pose_received && prior_ikdtree_built &&
-            !prior_pose_changed_enough(*msg, initial_pose))
+            !prior_pose_changed_enough(*msg, initial_pose) && !weak_lio_match)
         {
             return;
         }

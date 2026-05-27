@@ -1,0 +1,16 @@
+# 2_storey Gazebo 仿真 ICP
+# OctoMap 体素先验 vs Gazebo 网格雷达，fitness 常在 30~60，无法像实车 <0.08
+icp_node:
+  ros__parameters:
+    # false：等 /initialpose（sim_initialpose 或 Scan Context）后再发 /icp_result，避免 reloc 未就绪时丢消息
+    seed_manual_pose_from_launch: false
+    sim_trust_manual_pose: true
+    sim_trust_manual_pose_min_scans: 5
+    use_ndt_prefit: false
+    fitness_score_thre: 2.5
+    converged_count_thre: 3
+    max_correspondence_distance: 1.0
+    icp_coarse_yaw_half_range_deg: 180.0
+    icp_coarse_yaw_step_deg: 5.0
+    map_voxel_leaf_size: 0.2
+    cloud_voxel_leaf_size: 0.15

@@ -10,12 +10,19 @@ tf_manager_node:
     publish_odom_to_base: true
     publish_map_to_odom: true
     latch_map_to_odom: true
+    allow_icp_refine: true
+    icp_refine_min_interval_sec: 3.0
+    spin_block_reloc_wz: 0.55
+    spin_reloc_settle_sec: 2.5
+    icp_refine_max_yaw_deg: 25.0
+    icp_refine_max_xy_m: 0.6
     seed_map_to_odom_identity: false
     seed_odom_to_base_identity: true
     # 直接用 FAST-LIO（~10Hz）；planar_odom_filter 已从 bringup 移除
     odom_topic: /lio_odom_raw
     # 兼容旧 RViz/脚本；默认关闭，全栈以 /lio_odom_raw + TF 为准
-    republish_state_estimation: false
+    # map 系位姿：T_map_base = map->odom @ odom->base，~10Hz，供 EGO / RViz
+    republish_state_estimation: true
     state_estimation_topic: /state_estimation
     # false：odom->base 与 LIO 的 odom->imu_link 同位姿（需 base_link->imu_link 单位阵）
     apply_lio_to_base_extrinsic: false

@@ -68,6 +68,11 @@ install(DIRECTORY
   DESTINATION share/${PROJECT_NAME}
 )
 
+install(
+  PROGRAMS ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/run_rosbridge_safe.sh
+  DESTINATION share/${PROJECT_NAME}/scripts
+)
+
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   # the following line skips the linter which checks for copyrights

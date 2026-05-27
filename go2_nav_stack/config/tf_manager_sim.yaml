@@ -1,0 +1,9 @@
+# Gazebo / use_sim_time
+tf_manager_node:
+  ros__parameters:
+    refresh_map_to_odom_stamp: true
+    # LIO 位置 + Gazebo planar_move 航向（大转角/掉头时 LIO yaw 常滞后）
+    odom_yaw_override_topic: /gazebo_odom
+    yaw_smooth_alpha: 0.82
+    yaw_smooth_alpha_spin: 0.96
+    spin_angular_vel_threshold: 0.12

@@ -4,7 +4,7 @@
 icp_node:
   ros__parameters:
     gravity_align_enable: false
-    imu_topic: "/livox/imu"
+    imu_topic: "/livox/imu_filtered"
     icp_planar_constraint: true
     scan_azimuth_offset_deg: 0.0
     icp_crop_min_z: -0.8

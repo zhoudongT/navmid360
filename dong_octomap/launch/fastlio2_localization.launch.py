@@ -108,6 +108,11 @@ def _launch_setup(context, *args, **kwargs):
             "common.send_odom_base_tf": send_odom_base_tf,
         },
     ]
+    overlay = LaunchConfiguration("fastlio_config_overlay").perform(context).strip()
+    if overlay:
+        if not os.path.isfile(overlay):
+            raise RuntimeError(f"FAST-LIO overlay 配置不存在: {overlay}")
+        fast_lio_params.append(overlay)
 
     icp_share = get_package_share_directory("icp_relocalization")
     rviz_cfg = LaunchConfiguration("rviz_config").perform(context).strip()
@@ -176,6 +181,7 @@ def _launch_setup(context, *args, **kwargs):
         icp_yaml = os.path.join(dong_share, "config", "icp_fastlio_localization.yaml")
         icp_params = {
             "map_path": prior,
+            "imu_topic": imu_topic,
             "initial_x": float(LaunchConfiguration("initial_x").perform(context)),
             "initial_y": float(LaunchConfiguration("initial_y").perform(context)),
             "initial_z": float(LaunchConfiguration("initial_z").perform(context)),
@@ -192,6 +198,12 @@ def _launch_setup(context, *args, **kwargs):
             "icp_planar_constraint": LaunchConfiguration("icp_planar_constraint").perform(context).lower()
             in ("1", "true", "yes", "on"),
         }
+        icp_param_files: list = [icp_yaml, icp_params]
+        icp_overlay = LaunchConfiguration("icp_overlay_config").perform(context).strip()
+        if icp_overlay:
+            if not os.path.isfile(icp_overlay):
+                raise RuntimeError(f"ICP overlay 配置不存在: {icp_overlay}")
+            icp_param_files.append(icp_overlay)
         delayed = TimerAction(
             period=3.0,
             actions=[
@@ -200,7 +212,7 @@ def _launch_setup(context, *args, **kwargs):
                     executable="icp_node",
                     name="icp_node",
                     output="screen",
-                    parameters=[icp_yaml, icp_params],
+                    parameters=icp_param_files,
                 ),
                 Node(
                     package="fast_lio",
@@ -336,6 +348,16 @@ def generate_launch_description():
                 "icp_planar_constraint",
                 default_value="true",
                 description="ICP 仅输出平面位姿，避免朝天雷达误估 pitch 导致点云翘起",
+            ),
+            DeclareLaunchArgument(
+                "fastlio_config_overlay",
+                default_value="",
+                description="FAST-LIO 额外 YAML（Go2 先验图运动鲁棒参数）",
+            ),
+            DeclareLaunchArgument(
+                "icp_overlay_config",
+                default_value="",
+                description="icp_node 额外 YAML（如 Go2 continuous_tracking）",
             ),
             OpaqueFunction(function=_launch_setup),
         ]

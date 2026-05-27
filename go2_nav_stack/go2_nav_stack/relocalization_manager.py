@@ -15,8 +15,9 @@ import time
 
 import rclpy
 from geometry_msgs.msg import PoseWithCovarianceStamped, Quaternion
+from nav_msgs.msg import Odometry
 from rclpy.node import Node
-from std_msgs.msg import Bool, String
+from std_msgs.msg import Bool, Int32, String
 from std_srvs.srv import Trigger
 
 
@@ -37,6 +38,13 @@ class RelocalizationManager(Node):
         self.declare_parameter("startup_delay_sec", 10.0)
         self.declare_parameter("reloc_on_tf_lost_when_navigating", False)
         self.declare_parameter("tf_lost_reloc_cooldown_sec", 30.0)
+        self.declare_parameter("accept_continuous_icp", True)
+        self.declare_parameter("lio_weak_reloc_sec", 5.0)
+        self.declare_parameter("lio_weak_eff_threshold", 8)
+        self.declare_parameter("lio_weak_reloc_cooldown_sec", 15.0)
+        self.declare_parameter("block_reloc_during_spin", True)
+        self.declare_parameter("spin_block_reloc_wz", 0.55)
+        self.declare_parameter("spin_reloc_settle_sec", 2.0)
 
         self._initial_pose_pub = self.create_publisher(
             PoseWithCovarianceStamped, "/initialpose", 10
@@ -53,6 +61,9 @@ class RelocalizationManager(Node):
             PoseWithCovarianceStamped, "/icp_result", self._on_icp_result, 10
         )
         self.create_subscription(String, "/navigation/state", self._on_nav_state, 10)
+        self.create_subscription(
+            Int32, "/fastlio/effective_points", self._on_lio_effective, 10
+        )
         if bool(self.get_parameter("accept_manual_initialpose").value):
             self.create_subscription(
                 PoseWithCovarianceStamped,
@@ -70,6 +81,16 @@ class RelocalizationManager(Node):
         self._prev_nav_state = "IDLE"
         self._startup_done = False
         self._last_reloc_time = 0.0
+        self._lio_weak_since: float | None = None
+        self._last_lio_weak_reloc = 0.0
+        self._last_wz = 0.0
+        self._last_odom_mono = 0.0
+        self._spin_settle_until = 0.0
+        self._block_spin_reloc = bool(self.get_parameter("block_reloc_during_spin").value)
+        self._spin_block_wz = float(self.get_parameter("spin_block_reloc_wz").value)
+        self._spin_settle_sec = float(self.get_parameter("spin_reloc_settle_sec").value)
+
+        self.create_subscription(Odometry, "/lio_odom_raw", self._on_lio_odom, 20)
 
         if bool(self.get_parameter("auto_reloc_on_start").value):
             delay = float(self.get_parameter("startup_delay_sec").value)
@@ -89,6 +110,23 @@ class RelocalizationManager(Node):
             self.get_logger().info(
                 "relocalization_manager: manual /initialpose -> ICP -> /relocalization/pose"
             )
+
+    def _on_lio_odom(self, msg: Odometry) -> None:
+        self._last_wz = float(msg.twist.twist.angular.z)
+        self._last_odom_mono = time.monotonic()
+
+    def _is_spin_protected(self) -> bool:
+        if not self._block_spin_reloc:
+            return False
+        now = time.monotonic()
+        if now < self._spin_settle_until:
+            return True
+        if now - self._last_odom_mono > 0.6:
+            return False
+        if abs(self._last_wz) >= self._spin_block_wz:
+            self._spin_settle_until = now + self._spin_settle_sec
+            return True
+        return False
 
     def _on_manual_initialpose(self, msg: PoseWithCovarianceStamped) -> None:
         """Qt「当前姿态」/ RViz 2D Pose：仅 ICP，不跑 Scan Context。"""
@@ -131,6 +169,34 @@ class RelocalizationManager(Node):
             return
         self._trigger_reloc("tf_lost")
 
+    def _on_lio_effective(self, msg: Int32) -> None:
+        if not self._reloc_locked or self._reloc_busy:
+            self._lio_weak_since = None
+            return
+        if self._is_spin_protected():
+            self._lio_weak_since = None
+            return
+        threshold = int(self.get_parameter("lio_weak_eff_threshold").value)
+        need_weak_sec = float(self.get_parameter("lio_weak_reloc_sec").value)
+        cooldown = float(self.get_parameter("lio_weak_reloc_cooldown_sec").value)
+        now = time.monotonic()
+        if msg.data >= threshold:
+            self._lio_weak_since = None
+            return
+        if self._lio_weak_since is None:
+            self._lio_weak_since = now
+            return
+        if now - self._lio_weak_since < need_weak_sec:
+            return
+        if now - self._last_lio_weak_reloc < cooldown:
+            return
+        self._lio_weak_since = None
+        self._last_lio_weak_reloc = now
+        self.get_logger().warn(
+            f"LIO eff={msg.data}<{threshold} for {need_weak_sec:.0f}s -> ScanContext+ICP"
+        )
+        self._trigger_reloc("service")
+
     def _on_reloc(self, _req: Trigger.Request, res: Trigger.Response) -> Trigger.Response:
         self._trigger_reloc("service")
         res.success = True
@@ -140,6 +206,12 @@ class RelocalizationManager(Node):
     def _trigger_reloc(self, reason: str) -> None:
         if reason not in self._ALLOWED_REASONS:
             self.get_logger().warn(f"relocalization ignored: unknown reason '{reason}'")
+            return
+        if reason != "startup" and self._is_spin_protected():
+            self.get_logger().warn(
+                f"转圈中/刚停转：跳过自动重定位 ({reason})",
+                throttle_duration_sec=2.0,
+            )
             return
         if reason == "startup" and self._reloc_locked:
             self.get_logger().info("startup relocalization skipped (already locked)")
@@ -220,7 +292,15 @@ class RelocalizationManager(Node):
         )
 
     def _on_icp_result(self, msg: PoseWithCovarianceStamped) -> None:
-        if not self._awaiting_icp:
+        accept_continuous = bool(self.get_parameter("accept_continuous_icp").value)
+        if not self._awaiting_icp and not (accept_continuous and self._reloc_locked):
+            return
+        first_lock = not self._reloc_locked
+        if not first_lock and self._is_spin_protected():
+            self.get_logger().warn(
+                "转圈中：忽略 ICP 连续修正，避免 map->odom 被拉偏",
+                throttle_duration_sec=2.0,
+            )
             return
         self._awaiting_icp = False
         self._reloc_busy = False
@@ -242,8 +322,9 @@ class RelocalizationManager(Node):
             2.0 * (out.pose.pose.orientation.w * out.pose.pose.orientation.z),
             1.0 - 2.0 * (out.pose.pose.orientation.z**2),
         )
+        tag = "NDT/ICP locked" if first_lock else "ICP refine"
         self.get_logger().info(
-            f"NDT/ICP locked map->odom via /relocalization/pose "
+            f"{tag} map->odom via /relocalization/pose "
             f"({p.x:.2f},{p.y:.2f}) yaw={math.degrees(yaw):.1f}°"
         )
 

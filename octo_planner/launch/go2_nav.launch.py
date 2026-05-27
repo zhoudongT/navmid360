@@ -199,9 +199,16 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration("launch_web")),
     )
 
-    # rosbridge 延迟启动 + 启动前释放端口，避免 [Errno 98] 与 launch 内重试刷屏
-    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-    rosbridge_safe = os.path.join(repo_root, "scripts", "run_rosbridge_safe.sh")
+    # rosbridge：优先 install 内脚本，其次仓库 scripts/
+    rosbridge_safe = os.path.join(octo_planner_share, "scripts", "run_rosbridge_safe.sh")
+    if not os.path.isfile(rosbridge_safe):
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
+        rosbridge_safe = os.path.join(repo_root, "scripts", "run_rosbridge_safe.sh")
+    if not os.path.isfile(rosbridge_safe):
+        nav_root = os.environ.get("NAVMID360_ROOT", "/home/allen/navmid360")
+        rosbridge_safe = os.path.join(nav_root, "scripts", "run_rosbridge_safe.sh")
+    if not os.path.isfile(rosbridge_safe):
+        raise RuntimeError(f"未找到 run_rosbridge_safe.sh: {rosbridge_safe}")
     rosbridge_delayed = TimerAction(
         period=LaunchConfiguration("rosbridge_delay_sec"),
         actions=[

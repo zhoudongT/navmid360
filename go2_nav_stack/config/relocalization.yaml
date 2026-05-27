@@ -9,12 +9,21 @@ scan_context_manager:
 
 relocalization_manager:
   ros__parameters:
-    # 一键启动默认：不自动 Scan Context，仅在 Qt「当前姿态」点击后发 /initialpose 走 ICP
-    auto_reloc_on_start: false
+    auto_reloc_on_start: true
     accept_manual_initialpose: true
-    startup_delay_sec: 10.0
+    # 快速 360° 时 ICP 连续修正易把 map->odom 拉偏，默认关
+    accept_continuous_icp: false
+    startup_delay_sec: 6.0
+    # 转圈时 TF 易抖，勿触发 tf_lost 全量重定位
     reloc_on_tf_lost_when_navigating: false
-    tf_lost_reloc_cooldown_sec: 30.0
+    tf_lost_reloc_cooldown_sec: 20.0
+    # 转圈时 eff 点下降是正常现象，勿过早 ScanContext（会误匹配）
+    lio_weak_reloc_sec: 10.0
+    lio_weak_eff_threshold: 5
+    lio_weak_reloc_cooldown_sec: 25.0
+    block_reloc_during_spin: true
+    spin_block_reloc_wz: 0.55
+    spin_reloc_settle_sec: 2.5
 
 single_map_manager:
   ros__parameters:

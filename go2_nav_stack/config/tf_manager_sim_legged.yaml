@@ -1,0 +1,11 @@
+# 四足 CHAMP Gazebo：使用 LIO 全 3D 位姿，不用 planar_move 的 /gazebo_odom 航向覆盖
+tf_manager_node:
+  ros__parameters:
+    # 重定位完成前先有 map 帧，供 ICP transformed_cloud / RViz；ICP 锁定后由 /relocalization/pose 覆盖
+    seed_map_to_odom_identity: true
+    refresh_map_to_odom_stamp: true
+    odom_yaw_override_topic: ""
+    planar_yaw_only: false
+    lock_odom_z: false
+    static_base_to_lidar_xyz: [0.168, 0.0, 0.093]
+    static_base_to_lidar_rpy: [0.0, 0.0, 0.0]

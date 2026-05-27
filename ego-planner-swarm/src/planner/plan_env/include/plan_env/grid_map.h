@@ -84,6 +84,12 @@ struct MappingParameters
   /* visualization and computation time display */
   double visualization_truncate_height_, virtual_ceil_height_, ground_height_, virtual_ceil_yp_, virtual_ceil_yn_;
   bool show_occ_time_;
+  bool planar_occ_check_;
+  bool planar_occ_relative_;
+  double planar_occ_z_min_, planar_occ_z_max_;
+  double planar_occ_z_min_offset_, planar_occ_z_max_offset_;
+  double planar_ref_z_;
+  double visualization_truncate_offset_;
 
   /* active mapping */
   double unknown_flag_;
@@ -184,6 +190,7 @@ public:
 
   void publishMap();
   void publishMapInflate(bool all_info = false);
+  void setPlanarReferenceZ(double ref_z);
 
   void publishDepth();
 
@@ -357,7 +364,24 @@ inline int GridMap::getOccupancy(Eigen::Vector3d pos)
 inline int GridMap::getInflateOccupancy(Eigen::Vector3d pos)
 {
   if (!isInMap(pos))
-    return -1;
+    return 0;
+
+  if (mp_.planar_occ_check_)
+  {
+    Eigen::Vector3i id;
+    posToIndex(pos, id);
+    const int z_min = std::max(
+        0, (int)std::floor((mp_.planar_occ_z_min_ - mp_.map_origin_(2)) * mp_.resolution_inv_));
+    const int z_max = std::min(
+        mp_.map_voxel_num_(2) - 1,
+        (int)std::floor((mp_.planar_occ_z_max_ - mp_.map_origin_(2)) * mp_.resolution_inv_));
+    for (int z = z_min; z <= z_max; ++z)
+    {
+      if (int(md_.occupancy_buffer_inflate_[toAddress(id(0), id(1), z)]))
+        return 1;
+    }
+    return 0;
+  }
 
   Eigen::Vector3i id;
   posToIndex(pos, id);

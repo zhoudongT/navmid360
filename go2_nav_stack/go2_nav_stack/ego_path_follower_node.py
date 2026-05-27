@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""将 /planned_path 发给 EGO：逐点(per_waypoint) 或沿路线前视(lookahead)。"""
+"""将 /planned_path 发给 EGO：整段(global_path) 或逐点(per_waypoint/lookahead)。"""
 
 from __future__ import annotations
 
@@ -39,16 +39,18 @@ class EgoPathFollowerNode(Node):
     def __init__(self) -> None:
         super().__init__("ego_path_follower")
         self.declare_parameter("planned_path_topic", "/planned_path")
+        self.declare_parameter("ego_global_path_topic", "/ego_global_path")
         self.declare_parameter("start_navigation_topic", "/start_navigation")
         self.declare_parameter("stop_navigation_topic", "/stop_navigation")
         self.declare_parameter("ego_goal_topic", "/move_base_simple/goal")
         self.declare_parameter("ego_trigger_topic", "/traj_start_trigger")
         self.declare_parameter("require_start_command", True)
-        # per_waypoint：严格按全局路径每个节点依次执行；lookahead：沿路径前视
-        self.declare_parameter("follow_mode", "per_waypoint")
+        # global_path：整段路径 -> /ego_global_path；per_waypoint/lookahead：单点 goal
+        self.declare_parameter("follow_mode", "global_path")
         self.declare_parameter("lookahead_m", 1.5)
         self.declare_parameter("max_corner_yaw_deg", 55.0)
         self.declare_parameter("goal_z", 0.27)
+        self.declare_parameter("preserve_path_z", True)
         self.declare_parameter("arrival_xy_m", 0.15)
         self.declare_parameter("yaw_arrival_deg", 35.0)
         self.declare_parameter("require_yaw_arrival", False)
@@ -57,6 +59,7 @@ class EgoPathFollowerNode(Node):
         self.declare_parameter("stuck_advance_force_dwell_sec", 8.0)
         self.declare_parameter("follow_tick_hz", 5.0)
         self.declare_parameter("goal_heartbeat_sec", 3.0)
+        self.declare_parameter("global_path_republish_sec", 12.0)
         self.declare_parameter("status_topic", "/local_planner/status")
         self.declare_parameter("map_frame", "map")
         self.declare_parameter("robot_frame", "base_link")
@@ -70,6 +73,7 @@ class EgoPathFollowerNode(Node):
         self._listener = tf2_ros.TransformListener(self._buffer, self)
         self._navigating = False
         self._goal_z = float(self.get_parameter("goal_z").value)
+        self._preserve_path_z = bool(self.get_parameter("preserve_path_z").value)
         self._arrival = float(self.get_parameter("arrival_xy_m").value)
         self._yaw_arrival = math.radians(
             float(self.get_parameter("yaw_arrival_deg").value)
@@ -83,6 +87,11 @@ class EgoPathFollowerNode(Node):
             self.get_parameter("stuck_advance_force_dwell_sec").value
         )
         self._follow_mode = str(self.get_parameter("follow_mode").value).strip()
+        self._global_path_mode = self._follow_mode in (
+            "global_path",
+            "full_path",
+            "path",
+        )
         self._per_waypoint = self._follow_mode in ("per_waypoint", "sequential", "node")
         self._lookahead_m = float(self.get_parameter("lookahead_m").value)
         self._max_corner_yaw = math.radians(
@@ -93,6 +102,10 @@ class EgoPathFollowerNode(Node):
         self._wp_enter_t = 0.0
         self._last_published_wp = -1
         self._last_publish_t = 0.0
+        self._nav_start_t = 0.0
+        self._global_repub_sec = max(
+            0.0, float(self.get_parameter("global_path_republish_sec").value)
+        )
 
         path_qos = QoSProfile(
             depth=1,
@@ -104,6 +117,11 @@ class EgoPathFollowerNode(Node):
         )
         self._goal_pub = self.create_publisher(
             PoseStamped, str(self.get_parameter("ego_goal_topic").value), 10
+        )
+        self._ego_path_pub = self.create_publisher(
+            Path,
+            str(self.get_parameter("ego_global_path_topic").value),
+            path_qos,
         )
         self._trigger_pub = self.create_publisher(
             PoseStamped, str(self.get_parameter("ego_trigger_topic").value), 10
@@ -129,10 +147,17 @@ class EgoPathFollowerNode(Node):
         )
         hz = max(1.0, float(self.get_parameter("follow_tick_hz").value))
         self.create_timer(1.0 / hz, self._tick)
-        mode_s = "逐点" if self._per_waypoint else f"前视{self._lookahead_m}m"
+        if self._global_path_mode:
+            mode_s = "整段路径"
+            out_s = str(self.get_parameter("ego_global_path_topic").value)
+        elif self._per_waypoint:
+            mode_s = "逐点"
+            out_s = "/move_base_simple/goal"
+        else:
+            mode_s = f"前视{self._lookahead_m}m"
+            out_s = "/move_base_simple/goal"
         self.get_logger().info(
-            f"ego_path_follower: {mode_s} 跟踪 /planned_path -> "
-            "/move_base_simple/goal"
+            f"ego_path_follower: {mode_s} 跟踪 /planned_path -> {out_s}"
         )
 
     def _segment_yaw_rad(self, seg_start: int) -> float:
@@ -199,6 +224,7 @@ class EgoPathFollowerNode(Node):
             self.get_logger().warn("start_navigation: 无 /planned_path")
             return
         self._navigating = True
+        self._nav_start_t = time.monotonic()
         self._current_wp = self._find_start_index()
         self._wp_enter_t = time.monotonic()
         self._last_published_wp = -1
@@ -206,8 +232,55 @@ class EgoPathFollowerNode(Node):
         trig.header.stamp = self.get_clock().now().to_msg()
         trig.header.frame_id = self._path.header.frame_id or "map"
         self._trigger_pub.publish(trig)
-        self._publish_waypoint(self._goal_index(), force=True)
+        if self._global_path_mode:
+            self._publish_global_path(force=True)
+            self._publish_terminal_goal()
+        else:
+            self._publish_waypoint(self._goal_index(), force=True)
         self._status_pub.publish(String(data="EGO_FOLLOWING"))
+
+    def _publish_global_path(self, *, force: bool = False) -> None:
+        if self._path is None or not self._path.poses:
+            return
+        now = time.monotonic()
+        if not force and now - self._last_publish_t < self._heartbeat:
+            return
+        out = Path()
+        out.header = self._path.header
+        out.header.stamp = self.get_clock().now().to_msg()
+        out.header.frame_id = out.header.frame_id or "map"
+        out.poses = list(self._path.poses)
+        if not self._preserve_path_z:
+            for ps in out.poses:
+                ps.pose.position.z = self._goal_z
+        self._ego_path_pub.publish(out)
+        self._last_publish_t = now
+        n = len(out.poses)
+        end = out.poses[-1].pose.position
+        self.get_logger().info(
+            f"[path_follower] 整段路径 -> EGO: {n} 点 "
+            f"终点=({end.x:.2f},{end.y:.2f}) start_wp={self._current_wp}",
+        )
+
+    def _publish_terminal_goal(self) -> None:
+        """供 ego_cmd_bridge 无 pos_cmd 时朝终点 fallback。"""
+        if self._path is None or not self._path.poses:
+            return
+        idx = len(self._path.poses) - 1
+        ps = self._path.poses[idx]
+        goal = PoseStamped()
+        goal.header.stamp = self.get_clock().now().to_msg()
+        goal.header.frame_id = self._path.header.frame_id or "map"
+        goal.pose = ps.pose
+        if not self._preserve_path_z:
+            goal.pose.position.z = self._goal_z
+        yaw = self._waypoint_yaw_rad(idx)
+        qx, qy, qz, qw = _yaw_to_quat(yaw)
+        goal.pose.orientation.x = qx
+        goal.pose.orientation.y = qy
+        goal.pose.orientation.z = qz
+        goal.pose.orientation.w = qw
+        self._goal_pub.publish(goal)
 
     def _dist_to_robot(self, x: float, y: float) -> float | None:
         try:
@@ -349,7 +422,8 @@ class EgoPathFollowerNode(Node):
         goal.header.stamp = self.get_clock().now().to_msg()
         goal.header.frame_id = self._path.header.frame_id or "map"
         goal.pose = ps.pose
-        goal.pose.position.z = self._goal_z
+        if not self._preserve_path_z:
+            goal.pose.position.z = self._goal_z
         yaw = self._waypoint_yaw_rad(idx)
         qx, qy, qz, qw = _yaw_to_quat(yaw)
         goal.pose.orientation.x = qx
@@ -418,6 +492,21 @@ class EgoPathFollowerNode(Node):
 
         n = len(self._path.poses)
         now = time.monotonic()
+
+        if self._global_path_mode:
+            end = self._path.poses[n - 1].pose.position
+            d_end = self._dist_to_robot(end.x, end.y)
+            if d_end is not None and d_end < max(self._arrival, 0.35):
+                self._finish_navigation()
+                return
+            # 仅导航开始后短时间内重发，供 planner respawn 恢复；正常行驶不再每秒 REPLAN
+            if (
+                self._global_repub_sec > 0.0
+                and now - self._nav_start_t < self._global_repub_sec
+                and now - self._last_publish_t >= self._heartbeat
+            ):
+                self._publish_global_path(force=True)
+            return
 
         if self._per_waypoint:
             goal_i = self._current_wp

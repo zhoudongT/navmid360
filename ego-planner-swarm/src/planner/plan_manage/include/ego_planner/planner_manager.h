@@ -44,6 +44,8 @@ namespace ego_planner
 
     double getSwarmClearance(void) { return bspline_optimizer_->getSwarmClearance(); }
 
+    void setPlanarReferenceZ(double ref_z);
+
     bool checkCollision(int drone_id);
     
 

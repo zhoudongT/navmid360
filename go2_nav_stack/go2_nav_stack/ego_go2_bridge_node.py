@@ -25,8 +25,11 @@ class EgoGo2BridgeNode(Node):
     def __init__(self) -> None:
         super().__init__("ego_go2_bridge")
         self.declare_parameter("drone_id", 0)
+        self.declare_parameter("publish_state_estimation", False)
         self.declare_parameter("odom_input_topic", "/lio_odom_raw")
         self.declare_parameter("cloud_input_topic", "/cloud_registered_map")
+        self.declare_parameter("cloud_fallback_topic", "/transformed_cloud")
+        self.declare_parameter("cloud_fallback_stale_sec", 0.45)
         self.declare_parameter("map_frame", "map")
         self.declare_parameter("base_frame", "base_link")
         self.declare_parameter("tf_timeout_sec", 0.3)
@@ -57,9 +60,13 @@ class EgoGo2BridgeNode(Node):
         self._base_frame = str(self.get_parameter("base_frame").value)
         self._tf_timeout = float(self.get_parameter("tf_timeout_sec").value)
 
-        self._odom_pub = self.create_publisher(
-            Odometry, f"{prefix}state_estimation", 20
-        )
+        self._publish_odom = bool(self.get_parameter("publish_state_estimation").value)
+        self._odom_pub = None
+        if self._publish_odom:
+            self._odom_pub = self.create_publisher(
+                Odometry, f"{prefix}state_estimation", 20
+            )
+
         self._cloud_pub = self.create_publisher(
             PointCloud2, f"{prefix}cloud_registered_map", 10
         )
@@ -69,10 +76,20 @@ class EgoGo2BridgeNode(Node):
 
         in_odom = str(self.get_parameter("odom_input_topic").value)
         in_cloud = str(self.get_parameter("cloud_input_topic").value)
-        self.create_subscription(Odometry, in_odom, self._on_odom, 20)
-        self.create_subscription(PointCloud2, in_cloud, self._on_cloud, 10)
+        fallback_cloud = str(self.get_parameter("cloud_fallback_topic").value)
+        self._cloud_fallback_stale = float(
+            self.get_parameter("cloud_fallback_stale_sec").value
+        )
+        if self._publish_odom:
+            self.create_subscription(Odometry, in_odom, self._on_odom, 20)
+        self.create_subscription(PointCloud2, in_cloud, self._on_cloud_primary, 10)
+        if fallback_cloud:
+            self.create_subscription(
+                PointCloud2, fallback_cloud, self._on_cloud_fallback, 10
+            )
 
         self._last_cloud_rx_sec = 0.0
+        self._last_primary_cloud_rx_sec = 0.0
         self.create_timer(0.5, self._check_cloud_freshness)
 
         crop_desc = (
@@ -81,34 +98,32 @@ class EgoGo2BridgeNode(Node):
             if self._crop_base
             else f"map z∈[{self._cloud_z_min},{self._cloud_z_max}]"
         )
+        odom_desc = (
+            f"{in_odom}+TF -> {prefix}state_estimation"
+            if self._publish_odom
+            else "odom 由 tf_manager 发布 /state_estimation"
+        )
         self.get_logger().info(
-            f"ego_go2_bridge: {in_odom} + TF {self._map_frame}->{self._base_frame} "
-            f"-> {prefix}state_estimation; {in_cloud} -> {prefix}cloud_registered_map; "
-            f"障碍点云 {crop_desc}"
+            f"ego_go2_bridge: {odom_desc}; {in_cloud} (+fallback {fallback_cloud}) "
+            f"-> {prefix}cloud_registered_map; 障碍点云 {crop_desc}"
         )
 
-    def _lookup_map_to_base(self, stamp: Time) -> TransformException | object:
+    def _lookup_map_to_base(self) -> TransformException | object:
         timeout = rclpy.duration.Duration(seconds=self._tf_timeout)
-        times = [stamp] if stamp.nanoseconds > 0 else []
-        times.append(Time())
-        last_exc: TransformException | None = None
-        for t in times:
-            try:
-                return self._buffer.lookup_transform(
-                    self._map_frame,
-                    self._base_frame,
-                    t,
-                    timeout=timeout,
-                )
-            except TransformException as exc:
-                last_exc = exc
-        raise last_exc  # type: ignore[misc]
+        # 对 EGO 的局部栅格更新来说，“最新位姿”比“严格时间对齐”更重要：
+        # map->odom 往往不是连续高频 TF（可能仅在重定位/ICP refine 时更新），用 stamp 查会大量失败，
+        # 导致 /drone_0_state_estimation 只有 1~2Hz，表现为障碍栅格中心钉在起点。
+        return self._buffer.lookup_transform(
+            self._map_frame,
+            self._base_frame,
+            Time(),
+            timeout=timeout,
+        )
 
     def _odom_in_map(self, msg: Odometry) -> Odometry | None:
         """与 tf_manager 一致：直接查 TF map->base_link，避免手写合成与 map->base 误用。"""
-        stamp = Time.from_msg(msg.header.stamp)
         try:
-            tf = self._lookup_map_to_base(stamp)
+            tf = self._lookup_map_to_base()
         except TransformException:
             return None
 
@@ -126,6 +141,8 @@ class EgoGo2BridgeNode(Node):
         return out
 
     def _on_odom(self, msg: Odometry) -> None:
+        if self._odom_pub is None:
+            return
         mapped = self._odom_in_map(msg)
         if mapped is None:
             return
@@ -146,23 +163,24 @@ class EgoGo2BridgeNode(Node):
         if (msg.header.frame_id or "").strip() == self._map_frame:
             return msg
         stamp = Time.from_msg(msg.header.stamp)
-        try:
-            tf = self._buffer.lookup_transform(
-                self._map_frame,
-                msg.header.frame_id,
-                stamp if stamp.nanoseconds > 0 else Time(),
-                timeout=rclpy.duration.Duration(seconds=self._tf_timeout),
-            )
-        except TransformException:
+        timeout = rclpy.duration.Duration(seconds=self._tf_timeout)
+        tf = None
+        # map->odom 常在 ICP refine 时跳变，stamp 对齐失败率高；优先最新 TF 保 EGO 栅格 ~10Hz
+        for t in (Time(), stamp if stamp.nanoseconds > 0 else None):
+            if t is None:
+                continue
             try:
                 tf = self._buffer.lookup_transform(
                     self._map_frame,
                     msg.header.frame_id,
-                    Time(),
-                    timeout=rclpy.duration.Duration(seconds=self._tf_timeout),
+                    t,
+                    timeout=timeout,
                 )
+                break
             except TransformException:
-                return msg
+                continue
+        if tf is None:
+            return msg
 
         t = tf.transform.translation
         q = tf.transform.rotation
@@ -209,25 +227,24 @@ class EgoGo2BridgeNode(Node):
             return msg
         kept: list[tuple[float, float, float]] = []
         if self._crop_base:
-            try:
-                tf = self._buffer.lookup_transform(
-                    self._map_frame,
-                    self._base_frame,
-                    Time.from_msg(msg.header.stamp)
-                    if msg.header.stamp.sec != 0 or msg.header.stamp.nanosec != 0
-                    else Time(),
-                    timeout=rclpy.duration.Duration(seconds=self._tf_timeout),
-                )
-            except TransformException:
+            timeout = rclpy.duration.Duration(seconds=self._tf_timeout)
+            tf = None
+            stamp = Time.from_msg(msg.header.stamp)
+            for t in (Time(), stamp if stamp.nanoseconds > 0 else None):
+                if t is None:
+                    continue
                 try:
                     tf = self._buffer.lookup_transform(
                         self._map_frame,
                         self._base_frame,
-                        Time(),
-                        timeout=rclpy.duration.Duration(seconds=self._tf_timeout),
+                        t,
+                        timeout=timeout,
                     )
+                    break
                 except TransformException:
-                    return msg
+                    continue
+            if tf is None:
+                return msg
             t = tf.transform.translation
             q = tf.transform.rotation
             for x, y, z in point_cloud2.read_points(
@@ -250,7 +267,7 @@ class EgoGo2BridgeNode(Node):
         header.frame_id = self._map_frame
         return point_cloud2.create_cloud_xyz32(header, kept)
 
-    def _on_cloud(self, msg: PointCloud2) -> None:
+    def _publish_cloud(self, msg: PointCloud2, source: str) -> None:
         if (msg.header.frame_id or "").strip() == self._map_frame:
             mapped = msg
         else:
@@ -259,6 +276,18 @@ class EgoGo2BridgeNode(Node):
         cropped.header.stamp = msg.header.stamp
         self._last_cloud_rx_sec = self.get_clock().now().nanoseconds * 1e-9
         self._cloud_pub.publish(cropped)
+
+    def _on_cloud_primary(self, msg: PointCloud2) -> None:
+        self._last_primary_cloud_rx_sec = self.get_clock().now().nanoseconds * 1e-9
+        self._publish_cloud(msg, "primary")
+
+    def _on_cloud_fallback(self, msg: PointCloud2) -> None:
+        if self._last_primary_cloud_rx_sec <= 0.0:
+            self._publish_cloud(msg, "fallback")
+            return
+        age = self.get_clock().now().nanoseconds * 1e-9 - self._last_primary_cloud_rx_sec
+        if age >= self._cloud_fallback_stale:
+            self._publish_cloud(msg, "fallback")
 
 
 def main() -> None:

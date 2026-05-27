@@ -26,7 +26,14 @@ timeout 2 ros2 run tf2_ros tf2_echo map base_link 2>&1 | grep -E "Translation|At
 
 echo ""
 echo "=== ④ EGO 局部规划（非 Nav2 costmap）==="
+if ! ros2 interface show traj_utils/msg/Bspline &>/dev/null; then
+  echo "  错误: 未加载 traj_utils，请先: source ${ROOT}/install/setup.bash"
+else
+  echo "  traj_utils/msg/Bspline OK"
+fi
+timeout 4 ros2 topic hz /drone_0_planning/bspline 2>&1 | tail -2 || echo "  无 bspline（EGO 未进入 EXEC_TRAJ 或规划失败）"
 timeout 4 ros2 topic hz /drone_0_planning/pos_cmd 2>&1 | tail -2 || echo "  无 pos_cmd"
+timeout 4 ros2 topic hz /ego_local_path 2>&1 | tail -2 || echo "  无 /ego_local_path"
 timeout 4 ros2 topic hz /cmd_vel 2>&1 | tail -2 || echo "  无 /cmd_vel"
 
 echo ""

@@ -16,6 +16,7 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(builtin_interfaces REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
@@ -59,7 +60,7 @@ add_library( traj_utils_lib SHARED
     src/polynomial_traj.cpp 
     )
 
-ament_target_dependencies(traj_utils_lib std_msgs geometry_msgs visualization_msgs rclcpp Eigen3 PCL)
+ament_target_dependencies(traj_utils_lib std_msgs geometry_msgs nav_msgs visualization_msgs rclcpp Eigen3 PCL)
 
 install(TARGETS traj_utils_lib
         DESTINATION lib

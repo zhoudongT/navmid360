@@ -35,6 +35,9 @@
   <exec_depend>icp_relocalization</exec_depend>
   <exec_depend>sensor_msgs_py</exec_depend>
   <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>traj_utils</exec_depend>
+  <exec_depend>quadrotor_msgs</exec_depend>
+  <exec_depend>ego_planner</exec_depend>
 
   <export>
     <build_type>ament_python</build_type>

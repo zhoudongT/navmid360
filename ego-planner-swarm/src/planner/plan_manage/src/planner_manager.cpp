@@ -6,6 +6,21 @@
 namespace ego_planner
 {
 
+  namespace
+  {
+    void enforcePlanarPoint(PlanParameters &pp, Eigen::Vector3d &p)
+    {
+      if (pp.planar_mode_)
+        p(2) = pp.cruise_z_;
+    }
+
+    void enforcePlanarVel(PlanParameters &pp, Eigen::Vector3d &v)
+    {
+      if (pp.planar_mode_)
+        v(2) = 0.0;
+    }
+  } // namespace
+
   EGOPlannerManager::EGOPlannerManager() {}
 
   EGOPlannerManager::~EGOPlannerManager() {}
@@ -20,6 +35,9 @@ namespace ego_planner
     node->declare_parameter("manager/planning_horizon", 5.0);
     node->declare_parameter("manager/use_distinctive_trajs", false);
     node->declare_parameter("manager/drone_id", -1);
+    node->declare_parameter("manager/planar_mode", true);
+    node->declare_parameter("manager/preserve_global_path_z", true);
+    node->declare_parameter("manager/cruise_z", 0.27);
 
     node->get_parameter("manager/max_vel", pp_.max_vel_);
     node->get_parameter("manager/max_acc", pp_.max_acc_);
@@ -29,6 +47,9 @@ namespace ego_planner
     node->get_parameter("manager/planning_horizon", pp_.planning_horizen_);
     node->get_parameter("manager/use_distinctive_trajs", pp_.use_distinctive_trajs);
     node->get_parameter("manager/drone_id", pp_.drone_id);
+    node->get_parameter("manager/planar_mode", pp_.planar_mode_);
+    node->get_parameter("manager/preserve_global_path_z", pp_.preserve_global_path_z_);
+    node->get_parameter("manager/cruise_z", pp_.cruise_z_);
 
     local_data_.traj_id_ = 0;
     grid_map_.reset(new GridMap);
@@ -38,11 +59,23 @@ namespace ego_planner
     bspline_optimizer_.reset(new BsplineOptimizer);
     // bspline_optimizer_->setParam(nh);
     bspline_optimizer_->setParam(node);
+    bspline_optimizer_->setPlanarMode(pp_.planar_mode_, pp_.cruise_z_);
     bspline_optimizer_->setEnvironment(grid_map_, obj_predictor_);
     bspline_optimizer_->a_star_.reset(new AStar);
     bspline_optimizer_->a_star_->initGridMap(grid_map_, Eigen::Vector3i(100, 100, 100));
 
     visualization_ = vis;
+  }
+
+  void EGOPlannerManager::setPlanarReferenceZ(double ref_z)
+  {
+    if (!pp_.planar_mode_)
+      return;
+    pp_.cruise_z_ = ref_z;
+    if (grid_map_)
+      grid_map_->setPlanarReferenceZ(ref_z);
+    if (bspline_optimizer_)
+      bspline_optimizer_->setPlanarReferenceZ(ref_z);
   }
 
   bool EGOPlannerManager::reboundReplan(Eigen::Vector3d start_pt, Eigen::Vector3d start_vel,
@@ -51,6 +84,12 @@ namespace ego_planner
   {
     static int count = 0;
     printf("\033[47;30m\n[drone %d replan %d]==============================================\033[0m\n", pp_.drone_id, count++);
+
+    enforcePlanarPoint(pp_, start_pt);
+    enforcePlanarPoint(pp_, local_target_pt);
+    enforcePlanarVel(pp_, start_vel);
+    enforcePlanarVel(pp_, local_target_vel);
+    enforcePlanarVel(pp_, start_acc);
 
     if ((start_pt - local_target_pt).norm() < 0.2)
     {
@@ -97,10 +136,14 @@ namespace ego_planner
         else
         {
           Eigen::Vector3d horizen_dir = ((start_pt - local_target_pt).cross(Eigen::Vector3d(0, 0, 1))).normalized();
-          Eigen::Vector3d vertical_dir = ((start_pt - local_target_pt).cross(horizen_dir)).normalized();
           Eigen::Vector3d random_inserted_pt = (start_pt + local_target_pt) / 2 +
-                                               (((double)rand()) / RAND_MAX - 0.5) * (start_pt - local_target_pt).norm() * horizen_dir * 0.8 * (-0.978 / (continous_failures_count_ + 0.989) + 0.989) +
-                                               (((double)rand()) / RAND_MAX - 0.5) * (start_pt - local_target_pt).norm() * vertical_dir * 0.4 * (-0.978 / (continous_failures_count_ + 0.989) + 0.989);
+                                               (((double)rand()) / RAND_MAX - 0.5) * (start_pt - local_target_pt).norm() * horizen_dir * 0.8 * (-0.978 / (continous_failures_count_ + 0.989) + 0.989);
+          if (!pp_.planar_mode_)
+          {
+            Eigen::Vector3d vertical_dir = ((start_pt - local_target_pt).cross(horizen_dir)).normalized();
+            random_inserted_pt += (((double)rand()) / RAND_MAX - 0.5) * (start_pt - local_target_pt).norm() * vertical_dir * 0.4 * (-0.978 / (continous_failures_count_ + 0.989) + 0.989);
+          }
+          enforcePlanarPoint(pp_, random_inserted_pt);
           Eigen::MatrixXd pos(3, 3);
           pos.col(0) = start_pt;
           pos.col(1) = random_inserted_pt;
@@ -128,6 +171,7 @@ namespace ego_planner
               break;
             }
             last_pt = pt;
+            enforcePlanarPoint(pp_, pt);
             point_set.push_back(pt);
           }
         } while (flag_too_far || point_set.size() < 7); // To make sure the initial path has enough points.
@@ -215,6 +259,25 @@ namespace ego_planner
         }
       }
     } while (flag_regenerate);
+
+    // 防止局部目标异常时采样点过多导致优化器崩溃
+    {
+      const size_t max_pts =
+          static_cast<size_t>(pp_.planning_horizen_ / pp_.ctrl_pt_dist * 4) + 16;
+      if (point_set.size() > max_pts)
+      {
+        vector<Eigen::Vector3d> sub;
+        sub.reserve(max_pts);
+        const double step = double(point_set.size() - 1) / double(max_pts - 1);
+        for (size_t i = 0; i < max_pts; ++i)
+          sub.push_back(point_set[size_t(std::round(i * step))]);
+        point_set = std::move(sub);
+        RCLCPP_WARN(
+            rclcpp::get_logger("ego_planner"),
+            "reboundReplan: truncated init points to %zu (horizon=%.1f)",
+            max_pts, pp_.planning_horizen_);
+      }
+    }
 
     // 将轨迹变为B样条轨迹
     Eigen::MatrixXd ctrl_pts, ctrl_pts_temp;
@@ -395,9 +458,7 @@ namespace ego_planner
     points.push_back(start_pos);
 
     for (size_t wp_i = 0; wp_i < waypoints.size(); wp_i++)
-    {
       points.push_back(waypoints[wp_i]);
-    }
 
     double total_len = 0;
     total_len += (start_pos - waypoints[0]).norm();
@@ -439,7 +500,8 @@ namespace ego_planner
     Eigen::VectorXd time(pt_num - 1);
     for (int i = 0; i < pt_num - 1; ++i)
     {
-      time(i) = (pos.col(i + 1) - pos.col(i)).norm() / (pp_.max_vel_);
+      time(i) = std::max(
+          (pos.col(i + 1) - pos.col(i)).norm() / (pp_.max_vel_), 0.05);
     }
 
     time(0) *= 2.0;

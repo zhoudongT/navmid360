@@ -12,9 +12,12 @@ setup(
         ("share/" + package_name + "/config", [
             "config/frame_config.yaml",
             "config/tf_manager.yaml",
+            "config/tf_manager_sim.yaml",
+            "config/tf_manager_sim_legged.yaml",
             "config/relocalization.yaml",
             "config/single_map_manager.yaml",
             "config/planar_odom_filter.yaml",
+            "config/livox_imu_filter.yaml",
             "config/map_cloud_display.yaml",
             "config/nav2_mppi_params.yaml",
             "config/local_path_display.yaml",
@@ -45,6 +48,7 @@ setup(
         "console_scripts": [
             "tf_manager_node = go2_nav_stack.tf_manager_node:main",
             "planar_odom_filter_node = go2_nav_stack.planar_odom_filter_node:main",
+            "livox_imu_kalman_filter = go2_nav_stack.livox_imu_kalman_filter_node:main",
             "map_cloud_display_node = go2_nav_stack.map_cloud_display_node:main",
             "scan_context_manager = go2_nav_stack.scan_context_manager:main",
             "relocalization_manager = go2_nav_stack.relocalization_manager:main",
@@ -59,6 +63,12 @@ setup(
             "ego_cmd_bridge = go2_nav_stack.ego_cmd_bridge_node:main",
             "ego_traj_display = go2_nav_stack.ego_traj_display_node:main",
             "build_scan_context_db = go2_nav_stack.build_scan_context_db:main",
+            "sim_initialpose_publisher = go2_nav_stack.sim_initialpose_publisher:main",
+            "sim_legged_settle = go2_nav_stack.sim_legged_settle:main",
+            "robot_description_topic_publisher = go2_nav_stack.robot_description_topic_publisher:main",
+            "wait_for_gazebo_spawn = go2_nav_stack.wait_for_gazebo_spawn:main",
+            "sim_go2_set_stand_pose = go2_nav_stack.sim_go2_set_stand_pose:main",
+            "sim_foot_contacts_stub = go2_nav_stack.sim_foot_contacts_stub:main",
         ],
     },
 )

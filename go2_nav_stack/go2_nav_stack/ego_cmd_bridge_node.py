@@ -361,7 +361,7 @@ class EgoCmdBridgeNode(Node):
                 + self._kp_wz * self._traj_yaw_w * yaw_err_traj
             )
         else:
-            vx = self._kp_vx * body_to_goal
+            vx = _clamp(self._kp_vx * body_to_goal, -self._max_vx, self._max_vx)
             wz = self._kp_wz * (
                 self._wp_yaw_w * yaw_err_wp + self._traj_yaw_w * yaw_err_traj
             )
@@ -386,6 +386,8 @@ class EgoCmdBridgeNode(Node):
 
         if self._couple_vx_wz:
             vx, wz = self._couple_planar_speed(vx, wz)
+
+        vx = _clamp(vx, -self._max_vx, self._max_vx)
 
         out = Twist()
         out.linear.x = vx

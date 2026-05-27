@@ -109,6 +109,13 @@ namespace ego_planner
     void setWaypoints(const vector<Eigen::Vector3d> &waypts,
                       const vector<int> &waypt_idx); // N-2 constraints at most
     void setLocalTargetPt(const Eigen::Vector3d local_target_pt) { local_target_pt_ = local_target_pt; };
+    void setPlanarMode(bool enable, double cruise_z, bool /*preserve_path_z*/ = false)
+    {
+      planar_mode_ = enable;
+      cruise_z_ = cruise_z;
+    }
+
+    void setPlanarReferenceZ(double ref_z) { cruise_z_ = ref_z; }
 
     void optimize();
 
@@ -164,6 +171,8 @@ namespace ego_planner
     //
     double dist0_, swarm_clearance_; // safe distance
     double max_vel_, max_acc_;       // dynamic limits
+    bool planar_mode_{false};
+    double cruise_z_{0.27};
 
     int variable_num_;              // optimization variables
     int iter_num_;                  // iteration of the solver

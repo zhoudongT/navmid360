@@ -1,30 +1,43 @@
 #!/usr/bin/env bash
-# Go2 实车一键启动：Livox + FAST-LIO2 + ICP + TF + 网页规划 + Qt 地图管理 + Nav2 MPPI
+# Go2 实车一键启动：Livox + FAST-LIO2 + ICP + TF + 网页规划 + Qt 地图管理 + EGO 导航
 #
-# 重定位（默认）：不自动 Scan Context，请在 Qt map_viewer 中：
-#   1. 点「当前姿态」-> 在地图上点机器人位置
-#   2. 再点朝向 -> 发布 /initialpose，等待 ICP 收敛（/relocalization/status=RELOCALIZED）
+# 默认地图: /home/allen/maps/window_filtered_all + 先验 /home/allen/maps/scans_0.5m.pcd
+#
+# 默认：开机 Scan Context 粗定位 -> /initialpose -> ICP 精对齐（约 6–15s）
+# 手动：RELOC_AUTO_START=false，Qt「当前姿态」点选
+# 已知粗位姿：RELOC_AUTO_START=false INITIAL_X=... INITIAL_Y=... INITIAL_YAW=...
 #
 # 用法:
 #   ./scripts/go2_nav_oneclick.sh
-#   MAP_PACKAGE=/path/to/octomap_pkg PRIOR_PCD=/path/to/map.pcd ./scripts/go2_nav_oneclick.sh
 #   ./scripts/go2_nav_oneclick.sh --no-gui --no-rviz
-#   RELOC_AUTO_START=true ./scripts/go2_nav_oneclick.sh   # 改回开机自动 Scan Context
+#   RELOC_AUTO_START=false ./scripts/go2_nav_oneclick.sh
+#   RELOC_AUTO_START=false INITIAL_X=5 INITIAL_Y=2 INITIAL_YAW=1.57 ./scripts/go2_nav_oneclick.sh
 
 set -eo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-MAP_PACKAGE="${MAP_PACKAGE:-/home/allen/maps/window_filtered_all}"
-PRIOR_PCD="${PRIOR_PCD:-/home/allen/maps/scans_0.5m.pcd}"
+MAPS_ROOT="${MAPS_ROOT:-/home/allen/maps}"
+MAP_PACKAGE="${MAP_PACKAGE:-${MAPS_ROOT}/window_filtered_all}"
+PRIOR_PCD="${PRIOR_PCD:-${MAPS_ROOT}/scans_0.5m.pcd}"
 LAUNCH_RVIZ="${LAUNCH_RVIZ:-true}"
 LAUNCH_MAP_GUI="${LAUNCH_MAP_GUI:-true}"
 LAUNCH_ROSBRIDGE="${LAUNCH_ROSBRIDGE:-true}"
 LAUNCH_WEB="${LAUNCH_WEB:-true}"
 WEB_PORT="${WEB_PORT:-8888}"
 ROSBRIDGE_PORT="${ROSBRIDGE_PORT:-9090}"
-RELOC_AUTO_START="${RELOC_AUTO_START:-false}"
+RELOC_AUTO_START="${RELOC_AUTO_START:-true}"
+RELOC_STARTUP_DELAY_SEC="${RELOC_STARTUP_DELAY_SEC:-6}"
+ICP_CONVERGED_COUNT="${ICP_CONVERGED_COUNT:-8}"
+INITIAL_X="${INITIAL_X:-}"
+INITIAL_Y="${INITIAL_Y:-}"
+INITIAL_Z="${INITIAL_Z:-0}"
+INITIAL_YAW="${INITIAL_YAW:-0}"
+SEED_INITIALPOSE=false
+if [[ "$RELOC_AUTO_START" != true && -n "$INITIAL_X" && -n "$INITIAL_Y" ]]; then
+  SEED_INITIALPOSE=true
+fi
 FAST_START="${FAST_START:-1}"
 ROSBRIDGE_DELAY_SEC="${ROSBRIDGE_DELAY_SEC:-2.0}"
 
@@ -36,7 +49,8 @@ while [[ $# -gt 0 ]]; do
     --no-web) LAUNCH_WEB=false; shift ;;
     -h|--help)
       echo "用法: $0 [--no-gui] [--no-rviz] [--no-web] [--no-web-bridge]"
-      echo "环境变量: MAP_PACKAGE PRIOR_PCD FAST_START ROSBRIDGE_DELAY_SEC RELOC_AUTO_START ..."
+      echo "环境变量: RELOC_AUTO_START RELOC_STARTUP_DELAY_SEC ICP_CONVERGED_COUNT"
+      echo "          INITIAL_X INITIAL_Y INITIAL_YAW MAPS_ROOT MAP_PACKAGE PRIOR_PCD ..."
       exit 0
       ;;
     *) echo "未知参数: $1"; exit 1 ;;
@@ -115,17 +129,19 @@ echo "=========================================="
 echo " Go2 导航一键启动"
 echo " 地图包:     $MAP_PACKAGE"
 echo " 先验 PCD:   $PRIOR_PCD"
+echo " maps 根目录: $MAPS_ROOT"
 echo " 网页:       $([ "$LAUNCH_WEB" = true ] && echo "http://127.0.0.1:${WEB_PORT}" || echo '未启动 (--no-web)')"
 echo " rosbridge:  ws://127.0.0.1:${ROSBRIDGE_PORT}"
 echo " Qt Manager: $LAUNCH_MAP_GUI"
 echo " RViz:       $LAUNCH_RVIZ"
-echo " 重定位:     $([ "$RELOC_AUTO_START" = true ] && echo '开机自动 ScanContext' || echo '手动 Qt「当前姿态」点击')"
+echo " 重定位:     $([ "$RELOC_AUTO_START" = true ] && echo "自动 SC+ICP (${RELOC_STARTUP_DELAY_SEC}s)" || ([ "$SEED_INITIALPOSE" = true ] && echo "种子 ICP (${INITIAL_X},${INITIAL_Y})" || echo '手动 Qt「当前姿态」'))"
 echo " 里程计:     FAST-LIO2 + ICP 先验图"
 echo " 局部规划:   EGO Planner；全局 /planned_path -> /move_base_simple/goal"
 echo " 快速启动:   FAST_START=${FAST_START}  rosbridge_delay=${ROSBRIDGE_DELAY_SEC}s"
 echo "=========================================="
 
 exec ros2 launch go2_nav_stack go2_full_stack.launch.py \
+  maps_root:="$MAPS_ROOT" \
   map_package_dir:="$MAP_PACKAGE" \
   prior_pcd_path:="$PRIOR_PCD" \
   launch_rviz:="$LAUNCH_RVIZ" \
@@ -135,4 +151,11 @@ exec ros2 launch go2_nav_stack go2_full_stack.launch.py \
   web_http_port:="$WEB_PORT" \
   rosbridge_port:="$ROSBRIDGE_PORT" \
   reloc_auto_start:="$RELOC_AUTO_START" \
+  reloc_startup_delay_sec:="$RELOC_STARTUP_DELAY_SEC" \
+  icp_converged_count_thre:="$ICP_CONVERGED_COUNT" \
+  seed_initialpose:="$SEED_INITIALPOSE" \
+  initial_x:="${INITIAL_X:-0.0}" \
+  initial_y:="${INITIAL_Y:-0.0}" \
+  initial_z:="${INITIAL_Z:-0.0}" \
+  initial_a:="${INITIAL_YAW:-0.0}" \
   rosbridge_delay_sec:="$ROSBRIDGE_DELAY_SEC"

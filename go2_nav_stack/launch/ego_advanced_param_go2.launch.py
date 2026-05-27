@@ -10,7 +10,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, TextSubstitution
 from launch_ros.actions import Node
 
 
@@ -20,8 +20,8 @@ def generate_launch_description():
 
     map_size_x = LaunchConfiguration("map_size_x_", default="40.0")
     map_size_y = LaunchConfiguration("map_size_y_", default="40.0")
-    map_size_z = LaunchConfiguration("map_size_z_", default="2.5")
-    odometry_topic = LaunchConfiguration("odometry_topic", default="state_estimation")
+    map_size_z = LaunchConfiguration("map_size_z_", default="6.0")
+    odometry_topic = LaunchConfiguration("odometry_topic", default="/state_estimation")
     cloud_topic = LaunchConfiguration("cloud_topic", default="cloud_registered_map")
     max_vel = LaunchConfiguration("max_vel", default="0.35")
     max_acc = LaunchConfiguration("max_acc", default="2.0")
@@ -29,25 +29,65 @@ def generate_launch_description():
     flight_type = LaunchConfiguration("flight_type", default="1")
     drone_id = LaunchConfiguration("drone_id", default="0")
 
+    did = drone_id
+    abs_prefix = [TextSubstitution(text="/drone_"), did, TextSubstitution(text="_")]
+
     ego_planner_node = Node(
         package="ego_planner",
         executable="ego_planner_node",
         name=["drone_", drone_id, "_ego_planner_node"],
         output="screen",
+        respawn=True,
+        respawn_delay=2.0,
         remappings=[
-            ("odom_world", ["drone_", drone_id, "_", odometry_topic]),
-            ("planning/bspline", ["drone_", drone_id, "_planning/bspline"]),
-            ("planning/data_display", ["drone_", drone_id, "_planning/data_display"]),
+            ("odom_world", odometry_topic),
+            (
+                "planning/bspline",
+                [TextSubstitution(text="/drone_"), did, TextSubstitution(text="_planning/bspline")],
+            ),
+            (
+                "planning/data_display",
+                [TextSubstitution(text="/drone_"), did, TextSubstitution(text="_planning/data_display")],
+            ),
             ("planning/broadcast_bspline_from_planner", "/broadcast_bspline"),
             ("planning/broadcast_bspline_to_planner", "/broadcast_bspline"),
-            ("goal_point", ["drone_", drone_id, "_plan_vis/goal_point"]),
-            ("global_list", ["drone_", drone_id, "_plan_vis/global_list"]),
-            ("init_list", ["drone_", drone_id, "_plan_vis/init_list"]),
-            ("optimal_list", ["drone_", drone_id, "_plan_vis/optimal_list"]),
-            ("a_star_list", ["drone_", drone_id, "_plan_vis/a_star_list"]),
-            ("grid_map/odom", ["drone_", drone_id, "_", odometry_topic]),
-            ("grid_map/cloud", ["drone_", drone_id, "_", cloud_topic]),
-            ("grid_map/occupancy_inflate", ["drone_", drone_id, "_grid/grid_map/occupancy_inflate"]),
+            (
+                "goal_point",
+                [TextSubstitution(text="/drone_"), did, TextSubstitution(text="_plan_vis/goal_point")],
+            ),
+            (
+                "global_list",
+                [TextSubstitution(text="/drone_"), did, TextSubstitution(text="_plan_vis/global_list")],
+            ),
+            (
+                "global_ref_path",
+                [TextSubstitution(text="/drone_"), did, TextSubstitution(text="_plan_vis/global_ref_path")],
+            ),
+            (
+                "init_list",
+                [TextSubstitution(text="/drone_"), did, TextSubstitution(text="_plan_vis/init_list")],
+            ),
+            (
+                "optimal_list",
+                [TextSubstitution(text="/drone_"), did, TextSubstitution(text="_plan_vis/optimal_list")],
+            ),
+            (
+                "a_star_list",
+                [TextSubstitution(text="/drone_"), did, TextSubstitution(text="_plan_vis/a_star_list")],
+            ),
+            ("grid_map/odom", odometry_topic),
+            (
+                "grid_map/cloud",
+                [*abs_prefix, cloud_topic],
+            ),
+            (
+                "grid_map/occupancy_inflate",
+                [
+                    TextSubstitution(text="/drone_"),
+                    did,
+                    TextSubstitution(text="_grid/grid_map/occupancy_inflate"),
+                ],
+            ),
         ],
         parameters=[
             ego_core_yaml,

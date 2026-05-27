@@ -197,6 +197,9 @@ namespace ego_planner
     double planning_horizen_;
     bool use_distinctive_trajs;
     int drone_id; // single drone: drone_id <= -1, swarm: drone_id >= 0
+    bool planar_mode_; // Go2: 禁止从障碍上方飞越
+    bool preserve_global_path_z_{true}; // 仅全局 minSnap 保留路径 Z；局部 B-spline 仍锁 ref_z
+    double cruise_z_; // planar_occ 参考高度，由 FSM 按全局路径进度更新
 
     /* processing time */
     double time_search_ = 0.0;

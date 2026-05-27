@@ -58,12 +58,18 @@ def _launch_setup(context, *args, **kwargs):
             ("position_cmd", "/drone_0_planning/pos_cmd"),
             ("planning/bspline", "/drone_0_planning/bspline"),
         ],
-        parameters=[{"traj_server/time_forward": 1.0}],
+        parameters=[{"traj_server/time_forward": 2.0}],
     )
 
     return [
         ego_adv,
         traj_server,
+        Node(
+            package="tf2_ros",
+            executable="static_transform_publisher",
+            name="world_to_map_static_tf",
+            arguments=["0", "0", "0", "0", "0", "0", "map", "world"],
+        ),
         Node(
             package="go2_nav_stack",
             executable="ego_go2_bridge",
@@ -99,10 +105,10 @@ def generate_launch_description():
             DeclareLaunchArgument("drone_id", default_value="0"),
             DeclareLaunchArgument("map_size_x", default_value="40.0"),
             DeclareLaunchArgument("map_size_y", default_value="40.0"),
-            DeclareLaunchArgument("map_size_z", default_value="2.5"),
+            DeclareLaunchArgument("map_size_z", default_value="6.0"),
             DeclareLaunchArgument("max_vel", default_value="0.35"),
             DeclareLaunchArgument("max_acc", default_value="2.0"),
-            DeclareLaunchArgument("planning_horizon", default_value="0.8"),
+            DeclareLaunchArgument("planning_horizon", default_value="2.5"),
             OpaqueFunction(function=_launch_setup),
         ]
     )

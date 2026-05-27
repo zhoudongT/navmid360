@@ -45,6 +45,14 @@ void GridMap::initMap(rclcpp::Node::SharedPtr node)
   node_->declare_parameter("grid_map/local_map_margin", 1);
   node_->declare_parameter("grid_map/ground_height", 1.0);
   node_->declare_parameter("grid_map/odom_depth_timeout", 1.0);
+  node_->declare_parameter("grid_map/planar_occ_check", true);
+  node_->declare_parameter("grid_map/planar_occ_relative", true);
+  node_->declare_parameter("grid_map/planar_occ_z_min", 0.05);
+  node_->declare_parameter("grid_map/planar_occ_z_max", 0.55);
+  node_->declare_parameter("grid_map/planar_occ_z_min_offset", 0.05);
+  node_->declare_parameter("grid_map/planar_occ_z_max_offset", 0.55);
+  node_->declare_parameter("grid_map/planar_default_ref_z", 0.27);
+  node_->declare_parameter("grid_map/visualization_truncate_offset", 0.65);
 
   node_->get_parameter("grid_map/resolution", mp_.resolution_);
   node_->get_parameter("grid_map/map_size_x", x_size);
@@ -82,6 +90,22 @@ void GridMap::initMap(rclcpp::Node::SharedPtr node)
   node_->get_parameter("grid_map/local_map_margin", mp_.local_map_margin_);
   node_->get_parameter("grid_map/ground_height", mp_.ground_height_);
   node_->get_parameter("grid_map/odom_depth_timeout", mp_.odom_depth_timeout_);
+  node_->get_parameter("grid_map/planar_occ_check", mp_.planar_occ_check_);
+  node_->get_parameter("grid_map/planar_occ_relative", mp_.planar_occ_relative_);
+  node_->get_parameter("grid_map/planar_occ_z_min", mp_.planar_occ_z_min_);
+  node_->get_parameter("grid_map/planar_occ_z_max", mp_.planar_occ_z_max_);
+  node_->get_parameter("grid_map/planar_occ_z_min_offset", mp_.planar_occ_z_min_offset_);
+  node_->get_parameter("grid_map/planar_occ_z_max_offset", mp_.planar_occ_z_max_offset_);
+  double planar_default_ref_z = 0.27;
+  node_->get_parameter("grid_map/planar_default_ref_z", planar_default_ref_z);
+  node_->get_parameter("grid_map/visualization_truncate_offset", mp_.visualization_truncate_offset_);
+  if (mp_.planar_occ_relative_)
+  {
+    mp_.planar_ref_z_ = planar_default_ref_z;
+    mp_.planar_occ_z_min_ = mp_.planar_ref_z_ + mp_.planar_occ_z_min_offset_;
+    mp_.planar_occ_z_max_ = mp_.planar_ref_z_ + mp_.planar_occ_z_max_offset_;
+    mp_.visualization_truncate_height_ = mp_.planar_ref_z_ + mp_.visualization_truncate_offset_;
+  }
 
   if (mp_.virtual_ceil_height_ - mp_.ground_height_ > z_size)
   {
@@ -793,7 +817,8 @@ void GridMap::depthPoseCallback(const sensor_msgs::msg::Image::ConstPtr &img,
 
 void GridMap::odomCallback(const nav_msgs::msg::Odometry::SharedPtr odom)
 {
-  if (md_.has_first_depth_)
+  // 深度融合模式下位姿由 depthPoseCallback 更新；点云-only（Go2）须每帧刷新 camera_pos_
+  if (md_.has_first_depth_ && md_.flag_use_depth_fusion)
     return;
 
   md_.camera_pos_(0) = odom->pose.pose.position.x;
@@ -914,12 +939,18 @@ void GridMap::cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img)
   }
 }
 
+void GridMap::setPlanarReferenceZ(double ref_z)
+{
+  if (!mp_.planar_occ_relative_)
+    return;
+  mp_.planar_ref_z_ = ref_z;
+  mp_.planar_occ_z_min_ = ref_z + mp_.planar_occ_z_min_offset_;
+  mp_.planar_occ_z_max_ = ref_z + mp_.planar_occ_z_max_offset_;
+  mp_.visualization_truncate_height_ = ref_z + mp_.visualization_truncate_offset_;
+}
+
 void GridMap::publishMap()
 {
-
-  if (map_pub_->get_subscription_count() <= 0)
-    return;
-
   pcl::PointXYZ pt;
   pcl::PointCloud<pcl::PointXYZ> cloud;
 
@@ -933,6 +964,11 @@ void GridMap::publishMap()
   boundIndex(min_cut);
   boundIndex(max_cut);
 
+  // 随路径 ref_z 变化时，仍按机体高度裁剪 RViz 障碍，避免导航后“障碍消失”
+  const double viz_z_max = md_.has_odom_
+                               ? (md_.camera_pos_(2) + mp_.visualization_truncate_offset_)
+                               : mp_.visualization_truncate_height_;
+
   for (int x = min_cut(0); x <= max_cut(0); ++x)
     for (int y = min_cut(1); y <= max_cut(1); ++y)
       for (int z = min_cut(2); z <= max_cut(2); ++z)
@@ -942,7 +978,7 @@ void GridMap::publishMap()
 
         Eigen::Vector3d pos;
         indexToPos(Eigen::Vector3i(x, y, z), pos);
-        if (pos(2) > mp_.visualization_truncate_height_)
+        if (pos(2) > viz_z_max)
           continue;
 
         pt.x = pos(0);
@@ -963,10 +999,6 @@ void GridMap::publishMap()
 
 void GridMap::publishMapInflate(bool all_info)
 {
-
-  if (map_inf_pub_->get_subscription_count()<= 0)
-    return;
-
   pcl::PointXYZ pt;
   pcl::PointCloud<pcl::PointXYZ> cloud;
 
@@ -983,6 +1015,10 @@ void GridMap::publishMapInflate(bool all_info)
   boundIndex(min_cut);
   boundIndex(max_cut);
 
+  const double viz_z_max = md_.has_odom_
+                               ? (md_.camera_pos_(2) + mp_.visualization_truncate_offset_)
+                               : mp_.visualization_truncate_height_;
+
   for (int x = min_cut(0); x <= max_cut(0); ++x)
     for (int y = min_cut(1); y <= max_cut(1); ++y)
       for (int z = min_cut(2); z <= max_cut(2); ++z)
@@ -992,7 +1028,7 @@ void GridMap::publishMapInflate(bool all_info)
 
         Eigen::Vector3d pos;
         indexToPos(Eigen::Vector3i(x, y, z), pos);
-        if (pos(2) > mp_.visualization_truncate_height_)
+        if (pos(2) > viz_z_max)
           continue;
 
         pt.x = pos(0);

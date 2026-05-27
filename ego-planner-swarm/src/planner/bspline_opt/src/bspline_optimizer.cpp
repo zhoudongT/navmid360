@@ -494,7 +494,13 @@ namespace ego_planner
     // 进入或离开障碍物稳定的时间间隔
     constexpr int ENOUGH_INTERVAL = 2;
     // 障碍物检测的步长
-    double step_size = grid_map_->getResolution() / ((init_points.col(0) - init_points.rightCols(1)).norm() / (init_points.cols() - 1)) / 1.5;
+    const double avg_step =
+        init_points.cols() > 1
+            ? (init_points.col(0) - init_points.rightCols(1)).norm() /
+                  std::max(1, (int)init_points.cols() - 1)
+            : grid_map_->getResolution();
+    double step_size =
+        grid_map_->getResolution() / std::max(avg_step, grid_map_->getResolution()) / 1.5;
     int in_id = -1, out_id = -1;
     vector<std::pair<int, int>> segment_ids;
     int same_occ_state_times = ENOUGH_INTERVAL + 1;
@@ -696,6 +702,8 @@ namespace ego_planner
         Eigen::Vector3d ctrl_pts_law(init_points.col(j + 1) - init_points.col(j - 1)), intersection_point;
         // A*路径的中点
         int Astar_id = a_star_pathes[i].size() / 2, last_Astar_id; // Let "Astar_id = id_of_the_most_far_away_Astar_point" will be better, but it needs more computation
+        if (a_star_pathes[i].empty())
+          continue;
         // 路径点和控制点之间的点积，判断当前路径点在控制点方向 ctrl_pts_law 的哪一侧
         double val = (a_star_pathes[i][Astar_id] - init_points.col(j)).dot(ctrl_pts_law), last_val = val;
         while (Astar_id >= 0 && Astar_id < (int)a_star_pathes[i].size())
@@ -703,11 +711,12 @@ namespace ego_planner
           last_Astar_id = Astar_id;
 
           // 根据 val 的正负决定 Astar_id 的移动方向
-          if (val >= 0)
-            --Astar_id;
-          else
-            ++Astar_id;
+          const int next_Astar_id = (val >= 0) ? (Astar_id - 1) : (Astar_id + 1);
+          if (next_Astar_id < 0 || next_Astar_id >= (int)a_star_pathes[i].size())
+            break;
+          Astar_id = next_Astar_id;
 
+          last_val = val;
           val = (a_star_pathes[i][Astar_id] - init_points.col(j)).dot(ctrl_pts_law);
 
           if (val * last_val <= 0 && (abs(val) > 0 || abs(last_val) > 0)) // val = last_val = 0.0 is not allowed
@@ -767,17 +776,20 @@ namespace ego_planner
         Eigen::Vector3d middle_point = (init_points.col(segment_ids[i].second) + init_points.col(segment_ids[i].first)) / 2;
         // 计算A*中点并判断方向，同上
         int Astar_id = a_star_pathes[i].size() / 2, last_Astar_id; // Let "Astar_id = id_of_the_most_far_away_Astar_point" will be better, but it needs more computation
+        if (a_star_pathes[i].empty())
+          continue;
         double val = (a_star_pathes[i][Astar_id] - middle_point).dot(ctrl_pts_law), last_val = val;
         while (Astar_id >= 0 && Astar_id < (int)a_star_pathes[i].size())
         {
           last_Astar_id = Astar_id;
 
-          if (val >= 0)
-            --Astar_id;
-          else
-            ++Astar_id;
+          const int next_Astar_id = (val >= 0) ? (Astar_id - 1) : (Astar_id + 1);
+          if (next_Astar_id < 0 || next_Astar_id >= (int)a_star_pathes[i].size())
+            break;
+          Astar_id = next_Astar_id;
 
           // 和上面不一样，这里减去的是中点
+          last_val = val;
           val = (a_star_pathes[i][Astar_id] - middle_point).dot(ctrl_pts_law);
 
           if (val * last_val <= 0 && (abs(val) > 0 || abs(last_val) > 0)) // val = last_val = 0.0 is not allowed
@@ -1547,6 +1559,15 @@ namespace ego_planner
     // 变量个数
     variable_num_ = 3 * (end_id - start_id);
 
+    if (end_id <= start_id || variable_num_ <= 0)
+    {
+      RCLCPP_WARN(
+          rclcpp::get_logger("BsplineOptimizer"),
+          "rebound_optimize skipped: cps.size=%d order=%d variable_num=%d",
+          this->cps_.size, order_, variable_num_);
+      return false;
+    }
+
     rclcpp::Time t0 = rclcpp::Clock().now(), t1, t2;
     int restart_nums = 0, rebound_times = 0;
     ;
@@ -1563,9 +1584,9 @@ namespace ego_planner
       flag_occ = false;
       success = false;
 
-      // 控制点数组初始化
-      double q[variable_num_];
-      memcpy(q, cps_.points.data() + 3 * start_id, variable_num_ * sizeof(q[0]));
+      // 控制点数组初始化（避免 VLA 栈溢出）
+      std::vector<double> q(static_cast<size_t>(variable_num_));
+      memcpy(q.data(), cps_.points.data() + 3 * start_id, variable_num_ * sizeof(q[0]));
 
       // 初始化L-BFGS算法的参数
       lbfgs::lbfgs_parameter_t lbfgs_params;
@@ -1577,7 +1598,9 @@ namespace ego_planner
       /* ---------- optimize ---------- */
       t1 = rclcpp::Clock().now();
       // 执行优化
-      int result = lbfgs::lbfgs_optimize(variable_num_, q, &final_cost, BsplineOptimizer::costFunctionRebound, NULL, BsplineOptimizer::earlyExit, this, &lbfgs_params);
+      int result = lbfgs::lbfgs_optimize(
+          variable_num_, q.data(), &final_cost, BsplineOptimizer::costFunctionRebound, NULL,
+          BsplineOptimizer::earlyExit, this, &lbfgs_params);
       t2 = rclcpp::Clock().now();
       double time_ms = (t2 - t1).seconds() * 1000;
       double total_time_ms = (t2 - t0).seconds() * 1000;
@@ -1729,10 +1752,19 @@ namespace ego_planner
     int end_id = this->cps_.points.cols() - order_;
     variable_num_ = 3 * (end_id - start_id);
 
-    double q[variable_num_];
+    if (end_id <= start_id || variable_num_ <= 0)
+    {
+      RCLCPP_WARN(
+          rclcpp::get_logger("BsplineOptimizer"),
+          "refine_optimize skipped: cps.size=%d order=%d variable_num=%d",
+          this->cps_.size, order_, variable_num_);
+      return false;
+    }
+
+    std::vector<double> q(static_cast<size_t>(variable_num_));
     double final_cost;
 
-    memcpy(q, cps_.points.data() + 3 * start_id, variable_num_ * sizeof(q[0]));
+    memcpy(q.data(), cps_.points.data() + 3 * start_id, variable_num_ * sizeof(q[0]));
 
     double origin_lambda4 = lambda4_;
     bool flag_safe = true;
@@ -1745,7 +1777,9 @@ namespace ego_planner
       lbfgs_params.max_iterations = 200;
       lbfgs_params.g_epsilon = 0.001;
 
-      int result = lbfgs::lbfgs_optimize(variable_num_, q, &final_cost, BsplineOptimizer::costFunctionRefine, NULL, NULL, this, &lbfgs_params);
+      int result = lbfgs::lbfgs_optimize(
+          variable_num_, q.data(), &final_cost, BsplineOptimizer::costFunctionRefine, NULL, NULL,
+          this, &lbfgs_params);
       if (result == lbfgs::LBFGS_CONVERGENCE ||
           result == lbfgs::LBFGSERR_MAXIMUMITERATION ||
           result == lbfgs::LBFGS_ALREADY_MINIMIZED ||
@@ -1799,12 +1833,20 @@ namespace ego_planner
   // 计算损失
   void BsplineOptimizer::combineCostRebound(const double *x, double *grad, double &f_combine, const int n)
   {
-    // cout << "drone_id_=" << drone_id_ << endl;
-    // cout << "cps_.points.size()=" << cps_.points.size() << endl;
-    // cout << "n=" << n << endl;
-    // cout << "sizeof(x[0])=" << sizeof(x[0]) << endl;
+    double *x_mutable = const_cast<double *>(x);
+    if (planar_mode_)
+    {
+      for (int i = 2; i < n; i += 3)
+        x_mutable[i] = cruise_z_;
+    }
 
     memcpy(cps_.points.data() + 3 * order_, x, n * sizeof(x[0]));
+
+    if (planar_mode_)
+    {
+      for (int i = order_; i < cps_.size; ++i)
+        cps_.points(2, i) = cruise_z_;
+    }
 
     /* ---------- evaluate cost and gradient ---------- */
     double f_smoothness, f_distance, f_feasibility /*, f_mov_objs*/, f_swarm, f_terminal;
@@ -1830,6 +1872,11 @@ namespace ego_planner
     Eigen::MatrixXd grad_3D = lambda1_ * g_smoothness + new_lambda2_ * g_distance + lambda3_ * g_feasibility + new_lambda2_ * g_swarm + lambda2_ * g_terminal;
     // Eigen::MatrixXd grad_3D = lambda1_ * g_smoothness + new_lambda2_ * g_distance + lambda3_ * g_feasibility + new_lambda2_ * g_mov_objs;
     memcpy(grad, grad_3D.data() + 3 * order_, n * sizeof(grad[0]));
+    if (planar_mode_)
+    {
+      for (int i = 2; i < n; i += 3)
+        grad[i] = 0.0;
+    }
   }
 
   // 计算优化后的损失

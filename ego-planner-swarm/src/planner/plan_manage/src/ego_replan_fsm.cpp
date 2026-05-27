@@ -32,6 +32,11 @@ namespace ego_planner
     node_->get_parameter("fsm/realworld_experiment", flag_realworld_experiment_);
     node_->get_parameter("fsm/fail_safe", enable_fail_safe_);
 
+    node_->declare_parameter("fsm/global_path_enable", true);
+    node_->declare_parameter("fsm/global_path_topic", std::string("/ego_global_path"));
+    global_path_enable_ = node_->get_parameter("fsm/global_path_enable").as_bool();
+    global_path_topic_ = node_->get_parameter("fsm/global_path_topic").as_string();
+
     have_trigger_ = !flag_realworld_experiment_;
 
     node_->declare_parameter("fsm/waypoint_num", -1);
@@ -64,6 +69,10 @@ namespace ego_planner
 
     safety_timer_ = node_->create_wall_timer(std::chrono::milliseconds(50),
                                              std::bind(&EGOReplanFSM::checkCollisionCallback, this));
+
+    viz_refresh_timer_ = node_->create_wall_timer(
+        std::chrono::milliseconds(1000),
+        std::bind(&EGOReplanFSM::refreshVisualizationCallback, this));
 
     odom_sub_ = node_->create_subscription<nav_msgs::msg::Odometry>(
         "odom_world",
@@ -152,6 +161,24 @@ namespace ego_planner
     }
     else
       cout << "Wrong target_type_ value! target_type_=" << target_type_ << endl;
+
+    if (global_path_enable_)
+    {
+      rclcpp::QoS path_qos(1);
+      path_qos.transient_local();
+      path_qos.reliable();
+      global_path_sub_ = node_->create_subscription<nav_msgs::msg::Path>(
+          global_path_topic_,
+          path_qos,
+          [this](const std::shared_ptr<const nav_msgs::msg::Path> &msg)
+          {
+            this->globalPathCallback(msg);
+          });
+      RCLCPP_INFO(
+          node_->get_logger(),
+          "Global path mode: subscribe %s -> planGlobalTrajWaypoints",
+          global_path_topic_.c_str());
+    }
   }
 
   void EGOReplanFSM::readGivenWps()
@@ -204,6 +231,8 @@ namespace ego_planner
       have_target_ = true;
       have_new_target_ = true;
 
+      visualization_->displayGoalPoint(next_wp, Eigen::Vector4d(0, 0.5, 0.5, 1), 0.35, 0);
+
       /*** FSM状态转换 ***/
       if (exec_state_ == WAIT_TARGET)
         changeFSMExecState(GEN_NEW_TRAJ, "TRIG");
@@ -217,12 +246,154 @@ namespace ego_planner
         changeFSMExecState(REPLAN_TRAJ, "TRIG");
       }
 
-      visualization_->displayGlobalPathList(gloabl_traj, 0.1, 0);
+      visualization_->displayGlobalPathList(gloabl_traj, 0.15, 0);
     }
     else
     {
       RCLCPP_ERROR(node_->get_logger(), "Unable to generate global trajectory!");
     }
+  }
+
+  void EGOReplanFSM::planGlobalPath(const nav_msgs::msg::Path &path_msg)
+  {
+    if (path_msg.poses.empty())
+    {
+      RCLCPP_WARN(node_->get_logger(), "Received empty global path");
+      return;
+    }
+    if (!have_odom_)
+    {
+      pending_global_path_ = path_msg;
+      have_pending_global_path_ = true;
+      RCLCPP_WARN(node_->get_logger(), "Global path queued: no odometry yet (%zu poses)",
+                  path_msg.poses.size());
+      return;
+    }
+
+    const auto &path_end = path_msg.poses.back().pose.position;
+    const Eigen::Vector3d incoming_end(path_end.x, path_end.y, path_end.z);
+    // path_follower 心跳重发同一路径时勿反复 REPLAN（否则局部线会沿旧轨迹时间前移）
+    if (have_target_ && exec_state_ == EXEC_TRAJ && path_msg.poses.size() == last_global_path_n_ &&
+        (incoming_end - end_pt_).norm() < 0.15)
+    {
+      return;
+    }
+    last_global_path_n_ = path_msg.poses.size();
+
+    std::vector<Eigen::Vector3d> raw_wps;
+    raw_wps.reserve(path_msg.poses.size());
+    for (const auto &ps : path_msg.poses)
+    {
+      const double gz = ps.pose.position.z;
+      raw_wps.emplace_back(ps.pose.position.x, ps.pose.position.y, gz);
+    }
+
+    size_t start_i = 0;
+    double best_d = 1e9;
+    const size_t search_end = std::max(size_t(2), raw_wps.size() / 2);
+    for (size_t i = 0; i < search_end; ++i)
+    {
+      const double d = (raw_wps[i] - odom_pos_).norm();
+      if (d < best_d)
+      {
+        best_d = d;
+        start_i = i;
+      }
+    }
+
+    std::vector<Eigen::Vector3d> waypoints;
+    waypoints.reserve(raw_wps.size() - start_i);
+    for (size_t i = start_i; i < raw_wps.size(); ++i)
+      waypoints.push_back(raw_wps[i]);
+    if (waypoints.empty())
+      waypoints.push_back(raw_wps.back());
+
+    constexpr size_t kMaxPts = 200;
+    if (waypoints.size() > kMaxPts)
+    {
+      std::vector<Eigen::Vector3d> sub;
+      sub.reserve(kMaxPts);
+      const double step = double(waypoints.size() - 1) / double(kMaxPts - 1);
+      for (size_t i = 0; i < kMaxPts; ++i)
+        sub.push_back(waypoints[size_t(std::round(i * step))]);
+      waypoints = std::move(sub);
+    }
+
+    init_pt_ = odom_pos_;
+    planner_manager_->global_data_.last_progress_time_ = 0.0;
+
+    const bool success = planner_manager_->planGlobalTrajWaypoints(
+        odom_pos_, odom_vel_, Eigen::Vector3d::Zero(), waypoints,
+        Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero());
+
+    if (!success)
+    {
+      RCLCPP_ERROR(node_->get_logger(), "Unable to generate global trajectory from path!");
+      return;
+    }
+
+    end_pt_ = waypoints.back();
+    end_vel_.setZero();
+    have_target_ = true;
+    have_new_target_ = true;
+
+    if (planner_manager_->pp_.planar_mode_)
+    {
+      const double ref_z = planner_manager_->global_data_.getPosition(0.0)(2);
+      planner_manager_->setPlanarReferenceZ(ref_z);
+    }
+
+    visualization_->displayGoalPoint(end_pt_, Eigen::Vector4d(0, 0.5, 0.5, 1), 0.35, 0);
+
+    constexpr double step_size_t = 0.1;
+    const int i_end = std::max(
+        1, int(std::floor(planner_manager_->global_data_.global_duration_ / step_size_t)));
+    vector<Eigen::Vector3d> global_traj(i_end);
+    for (int i = 0; i < i_end; i++)
+      global_traj[i] = planner_manager_->global_data_.global_traj_.evaluate(i * step_size_t);
+    visualization_->displayGlobalPathList(global_traj, 0.15, 0);
+
+    RCLCPP_INFO(
+        node_->get_logger(),
+        "Global path loaded: %zu poses (from idx %zu), duration %.2fs, end=(%.2f, %.2f, z=%.2f)",
+        waypoints.size(), start_i, planner_manager_->global_data_.global_duration_,
+        end_pt_(0), end_pt_(1), end_pt_(2));
+
+    if (exec_state_ == WAIT_TARGET)
+      changeFSMExecState(GEN_NEW_TRAJ, "GLOBAL_PATH");
+    else if (exec_state_ == EXEC_TRAJ)
+      changeFSMExecState(REPLAN_TRAJ, "GLOBAL_PATH");
+    else
+      changeFSMExecState(GEN_NEW_TRAJ, "GLOBAL_PATH");
+  }
+
+  void EGOReplanFSM::globalPathCallback(const std::shared_ptr<const nav_msgs::msg::Path> &msg)
+  {
+    planGlobalPath(*msg);
+  }
+
+  void EGOReplanFSM::refreshGlobalPathVisualization()
+  {
+    if (!have_target_)
+      return;
+    const double duration = planner_manager_->global_data_.global_duration_;
+    if (duration < 1e-3)
+      return;
+
+    constexpr double step_size_t = 0.12;
+    const int i_end = std::max(2, int(std::floor(duration / step_size_t)));
+    vector<Eigen::Vector3d> global_traj(i_end);
+    for (int i = 0; i < i_end; i++)
+      global_traj[i] = planner_manager_->global_data_.getPosition(i * step_size_t);
+    visualization_->displayGlobalPathList(global_traj, 0.15, 0);
+  }
+
+  void EGOReplanFSM::refreshVisualizationCallback()
+  {
+    if (!have_target_)
+      return;
+    refreshGlobalPathVisualization();
+    visualization_->republishCachedVisualizations(end_pt_);
   }
 
   void EGOReplanFSM::triggerCallback(const std::shared_ptr<const geometry_msgs::msg::PoseStamped> &msg)
@@ -234,6 +405,9 @@ namespace ego_planner
 
   void EGOReplanFSM::waypointCallback(const std::shared_ptr<const geometry_msgs::msg::PoseStamped> &msg)
   {
+    if (global_path_enable_)
+      return;
+
     if (msg->pose.position.z < -0.1)
       return;
 
@@ -267,6 +441,13 @@ namespace ego_planner
     odom_orient_.z() = msg->pose.pose.orientation.z;
 
     have_odom_ = true;
+
+    if (have_pending_global_path_ && global_path_enable_)
+    {
+      nav_msgs::msg::Path pending = pending_global_path_;
+      have_pending_global_path_ = false;
+      planGlobalPath(pending);
+    }
   }
 
   void EGOReplanFSM::BroadcastBsplineCallback(const std::shared_ptr<const traj_utils::msg::Bspline> &msg)
@@ -605,7 +786,19 @@ namespace ego_planner
       }
       else if (t_cur > replan_thresh_)
       {
-        changeFSMExecState(REPLAN_TRAJ, "FSM");
+        if (!planner_manager_->pp_.planar_mode_)
+        {
+          changeFSMExecState(REPLAN_TRAJ, "FSM");
+        }
+        else
+        {
+          const double traj_dev =
+              (odom_pos_ - info->position_traj_.evaluateDeBoorT(t_cur)).norm();
+          const bool robot_moving = odom_vel_.norm() > 0.06;
+          // 四足静止且 odom 未偏离执行轨迹：不按墙钟时间 replan，局部路径锚在 odom
+          if (robot_moving || traj_dev > no_replan_thresh_ * 0.5)
+            changeFSMExecState(REPLAN_TRAJ, "FSM");
+        }
       }
 
       break;
@@ -646,6 +839,14 @@ namespace ego_planner
     start_pt_ = odom_pos_;
     start_vel_ = odom_vel_;
     start_acc_.setZero();
+    if (planner_manager_->pp_.planar_mode_)
+    {
+      // 局部段仍用 ref_z；起点保留里程计真实高度，避免与全局 3D 路径脱节
+      if (!planner_manager_->pp_.preserve_global_path_z_)
+        start_pt_(2) = planner_manager_->pp_.cruise_z_;
+      start_vel_(2) = 0.0;
+      start_acc_(2) = 0.0;
+    }
 
     bool flag_random_poly_init;
     if (timesOfConsecutiveStateCalls().first == 1)
@@ -672,9 +873,19 @@ namespace ego_planner
     // double t_cur = (time_now - info->start_time_).toSec();
     double t_cur = (time_now - info->start_time_).seconds();
 
-    start_pt_ = info->position_traj_.evaluateDeBoorT(t_cur);
-    start_vel_ = info->velocity_traj_.evaluateDeBoorT(t_cur);
-    start_acc_ = info->acceleration_traj_.evaluateDeBoorT(t_cur);
+    if (planner_manager_->pp_.planar_mode_)
+    {
+      // 四足/平面：replan 起点始终用真实 odom，避免狗未动但轨迹时间前进导致局部路径前移
+      start_pt_ = odom_pos_;
+      start_vel_ = odom_vel_;
+      start_acc_.setZero();
+    }
+    else
+    {
+      start_pt_ = info->position_traj_.evaluateDeBoorT(t_cur);
+      start_vel_ = info->velocity_traj_.evaluateDeBoorT(t_cur);
+      start_acc_ = info->acceleration_traj_.evaluateDeBoorT(t_cur);
+    }
 
     bool success = callReboundReplan(false, false);
 
@@ -830,6 +1041,7 @@ namespace ego_planner
 
       /* 3. publish traj for visualization */
       visualization_->displayOptimalList(info->position_traj_.get_control_points(), 0);
+      refreshGlobalPathVisualization();
     }
 
     return plan_and_refine_success;
@@ -967,7 +1179,33 @@ namespace ego_planner
     if (t > planner_manager_->global_data_.global_duration_) // Last global point
     {
       local_target_pt_ = end_pt_;
-      planner_manager_->global_data_.last_progress_time_ = planner_manager_->global_data_.global_duration_;
+      planner_manager_->global_data_.last_progress_time_ =
+          planner_manager_->global_data_.global_duration_;
+    }
+
+    // 勿把 20m+ 外的终点当作局部目标（易生成上千控制点 → L-BFGS 栈溢出 / SIGSEGV）
+    const double local_dist = (local_target_pt_ - start_pt_).norm();
+    if (local_dist > planning_horizen_ * 1.15)
+    {
+      double t_lo = planner_manager_->global_data_.last_progress_time_;
+      double t_hi = planner_manager_->global_data_.global_duration_;
+      double t_best = t_hi;
+      for (int k = 0; k < 32; ++k)
+      {
+        const double tm = 0.5 * (t_lo + t_hi);
+        const double dm = (planner_manager_->global_data_.getPosition(tm) - start_pt_).norm();
+        if (dm < planning_horizen_)
+          t_lo = tm;
+        else
+          t_hi = tm;
+        t_best = tm;
+      }
+      local_target_pt_ = planner_manager_->global_data_.getPosition(t_best);
+      planner_manager_->global_data_.last_progress_time_ = t_best;
+      RCLCPP_WARN(
+          node_->get_logger(),
+          "getLocalTarget: clipped far target (was %.1fm) to horizon ~%.1fm",
+          local_dist, planning_horizen_);
     }
 
     if ((end_pt_ - local_target_pt_).norm() < (planner_manager_->pp_.max_vel_ * planner_manager_->pp_.max_vel_) / (2 * planner_manager_->pp_.max_acc_))
@@ -977,6 +1215,16 @@ namespace ego_planner
     else
     {
       local_target_vel_ = planner_manager_->global_data_.getVelocity(t);
+    }
+    if (planner_manager_->pp_.planar_mode_)
+    {
+      double ref_z = local_target_pt_(2);
+      if (planner_manager_->global_data_.global_duration_ > 1e-3)
+        ref_z = planner_manager_->global_data_.getPosition(
+                    planner_manager_->global_data_.last_progress_time_)(2);
+      planner_manager_->setPlanarReferenceZ(ref_z);
+      local_target_pt_(2) = ref_z;
+      local_target_vel_(2) = 0.0;
     }
   }
 

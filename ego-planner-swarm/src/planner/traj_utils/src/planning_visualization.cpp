@@ -11,8 +11,9 @@ namespace ego_planner
                                                 Eigen::Vector4d color, int id, bool show_sphere /* = true */)
   {
     visualization_msgs::msg::Marker sphere, line_strip;
-    sphere.header.frame_id = line_strip.header.frame_id = "world";
+    sphere.header.frame_id = line_strip.header.frame_id = "map";
     sphere.header.stamp = line_strip.header.stamp = rclcpp::Clock().now();
+    sphere.ns = line_strip.ns = "ego_planner";
     sphere.type = visualization_msgs::msg::Marker::SPHERE_LIST;
     line_strip.type = visualization_msgs::msg::Marker::LINE_STRIP;
     sphere.action = line_strip.action = visualization_msgs::msg::Marker::ADD;
@@ -27,7 +28,7 @@ namespace ego_planner
     sphere.scale.x = scale;
     sphere.scale.y = scale;
     sphere.scale.z = scale;
-    line_strip.scale.x = scale / 2;
+    line_strip.scale.x = std::max(0.08, scale);
     geometry_msgs::msg::Point pt;
     for (int i = 0; i < int(list.size()); i++)
     {
@@ -122,8 +123,9 @@ namespace ego_planner
   void PlanningVisualization::displayGoalPoint(Eigen::Vector3d goal_point, Eigen::Vector4d color, const double scale, int id)
   {
     visualization_msgs::msg::Marker sphere;
-    sphere.header.frame_id = "world";
+    sphere.header.frame_id = "map";
     sphere.header.stamp = rclcpp::Clock().now();
+    sphere.ns = "ego_planner";
     sphere.type = visualization_msgs::msg::Marker::SPHERE;
     sphere.action = visualization_msgs::msg::Marker::ADD;
     sphere.id = id;
@@ -145,24 +147,39 @@ namespace ego_planner
 
   void PlanningVisualization::displayGlobalPathList(vector<Eigen::Vector3d> init_pts, const double scale, int id)
   {
-
-    if (global_list_pub->get_subscription_count() == 0)
-    {
+    if (init_pts.empty())
       return;
-    }
 
-    Eigen::Vector4d color(0, 0.5, 0.5, 1);
-    displayMarkerList(global_list_pub, init_pts, scale, color, id);
+    // id 与 optimal_list(0) 的 LINE_STRIP(1000) 错开，避免局部红线覆盖全局参考线
+    const int marker_id = id + 200;
+    Eigen::Vector4d color(0.1, 0.95, 0.35, 1);
+    displayMarkerList(global_list_pub, init_pts, scale, color, marker_id, false);
+    displayGlobalRefPathNav(init_pts);
+  }
+
+  void PlanningVisualization::displayGlobalRefPathNav(const vector<Eigen::Vector3d> &pts)
+  {
+    if (pts.empty())
+      return;
+    nav_msgs::msg::Path path;
+    path.header.frame_id = "map";
+    path.header.stamp = rclcpp::Clock().now();
+    path.poses.reserve(pts.size());
+    for (const auto &p : pts)
+    {
+      geometry_msgs::msg::PoseStamped ps;
+      ps.header = path.header;
+      ps.pose.position.x = p(0);
+      ps.pose.position.y = p(1);
+      ps.pose.position.z = p(2);
+      ps.pose.orientation.w = 1.0;
+      path.poses.push_back(ps);
+    }
+    global_ref_path_pub->publish(path);
   }
 
   void PlanningVisualization::displayMultiInitPathList(vector<vector<Eigen::Vector3d>> init_trajs, const double scale)
   {
-
-    if (init_list_pub->get_subscription_count() == 0)
-    {
-      return;
-    }
-
     static int last_nums = 0;
 
     for (int id = 0; id < last_nums; id++)
@@ -185,23 +202,14 @@ namespace ego_planner
 
   void PlanningVisualization::displayInitPathList(vector<Eigen::Vector3d> init_pts, const double scale, int id)
   {
-
-    if (init_list_pub->get_subscription_count() == 0)
-    {
-      return;
-    }
-
     Eigen::Vector4d color(0, 0, 1, 1);
     displayMarkerList(init_list_pub, init_pts, scale, color, id);
   }
 
   void PlanningVisualization::displayOptimalList(Eigen::MatrixXd optimal_pts, int id)
   {
-
-    if (optimal_list_pub->get_subscription_count() == 0)
-    {
-      return;
-    }
+    last_optimal_pts_ = optimal_pts;
+    has_last_optimal_ = optimal_pts.cols() > 0;
 
     vector<Eigen::Vector3d> list;
     for (int i = 0; i < optimal_pts.cols(); i++)
@@ -215,12 +223,6 @@ namespace ego_planner
 
   void PlanningVisualization::displayAStarList(std::vector<std::vector<Eigen::Vector3d>> a_star_paths, int id /* = Eigen::Vector4d(0.5,0.5,0,1)*/)
   {
-
-    if (a_star_list_pub->get_subscription_count() == 0)
-    {
-      return;
-    }
-
     int i = 0;
     vector<Eigen::Vector3d> list;
 
@@ -238,6 +240,13 @@ namespace ego_planner
       displayMarkerList(a_star_list_pub, list, scale, color, id + i); // real ids used: [ id ~ id+a_star_paths.size() ]
       i++;
     }
+  }
+
+  void PlanningVisualization::republishCachedVisualizations(const Eigen::Vector3d &goal_pt)
+  {
+    displayGoalPoint(goal_pt, Eigen::Vector4d(0, 0.5, 0.5, 1), 0.35, 0);
+    if (has_last_optimal_ && last_optimal_pts_.cols() > 0)
+      displayOptimalList(last_optimal_pts_, 0);
   }
 
   void PlanningVisualization::displayArrowList(rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr &pub, const vector<Eigen::Vector3d> &list, double scale, Eigen::Vector4d color, int id)

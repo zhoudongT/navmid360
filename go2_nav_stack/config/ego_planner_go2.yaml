@@ -1,10 +1,15 @@
 ego_go2_bridge:
   ros__parameters:
     drone_id: 0
+    publish_state_estimation: false
     odom_input_topic: /lio_odom_raw
-    cloud_input_topic: /cloud_registered_map
+    # 直连 FAST-LIO（~10Hz）；/cloud_registered_map 经 map_cloud_display 易因 stamp-TF 失败掉到 ~1Hz
+    cloud_input_topic: /cloud_registered
+    # transformed_cloud 在转圈时易滞后；仅主点云长时间缺失时才 fallback
+    cloud_fallback_topic: /transformed_cloud
+    cloud_fallback_stale_sec: 1.2
     map_frame: map
-    tf_timeout_sec: 0.3
+    tf_timeout_sec: 0.8
     enable_cloud_z_crop: true
     cloud_crop_in_base_frame: true
     lidar_height_m: 0.27
@@ -17,15 +22,18 @@ ego_go2_bridge:
 ego_path_follower:
   ros__parameters:
     planned_path_topic: /planned_path
+    ego_global_path_topic: /ego_global_path
     start_navigation_topic: /start_navigation
     stop_navigation_topic: /stop_navigation
     ego_goal_topic: /move_base_simple/goal
     ego_trigger_topic: /traj_start_trigger
     require_start_command: true
-    follow_mode: per_waypoint
+    # global_path：整段 /planned_path 一次发给 EGO；per_waypoint/lookahead 为旧逐点模式
+    follow_mode: global_path
     lookahead_m: 2.0
     max_corner_yaw_deg: 80.0
     goal_z: 0.27
+    preserve_path_z: true
     arrival_xy_m: 0.15
     yaw_arrival_deg: 60.0
     require_yaw_arrival: false
@@ -34,15 +42,20 @@ ego_path_follower:
     stuck_advance_force_dwell_sec: 8.0
     follow_tick_hz: 10.0
     goal_heartbeat_sec: 1.0
+    global_path_republish_sec: 12.0
     status_topic: /local_planner/status
 
 ego_traj_display:
   ros__parameters:
     pos_cmd_topic: /drone_0_planning/pos_cmd
+    bspline_topic: /drone_0_planning/bspline
+    optimal_list_topic: /drone_0_plan_vis/optimal_list
     ego_path_topic: /ego_exec_path
+    local_path_topic: /ego_local_path
     global_path_in: /planned_path
     global_path_viz_out: /planned_path_viz
-    trail_max_points: 80
+    trail_max_points: 120
+    local_path_segments: 12
     republish_hz: 2.0
 
 ego_cmd_bridge:

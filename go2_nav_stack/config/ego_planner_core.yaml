@@ -12,17 +12,20 @@
     fsm/flight_type: 1
     fsm/thresh_replan_time: 1.0
     fsm/thresh_no_replan_meter: 0.6
-    fsm/planning_horizon: 0.8
-    fsm/planning_horizen_time: 1.5
+    fsm/planning_horizon: 2.5
+    fsm/planning_horizen_time: 2.0
     fsm/emergency_time: 1.0
     fsm/realworld_experiment: false
     fsm/fail_safe: true
     fsm/waypoint_num: 1
+    # true：订阅 /ego_global_path，用 planGlobalTrajWaypoints 跟踪整段全局路径
+    fsm/global_path_enable: true
+    fsm/global_path_topic: /ego_global_path
 
     grid_map/resolution: 0.1
     grid_map/map_size_x: 40.0
     grid_map/map_size_y: 40.0
-    grid_map/map_size_z: 2.5
+    grid_map/map_size_z: 6.0
     grid_map/local_update_range_x: 4.5
     grid_map/local_update_range_y: 4.5
     grid_map/local_update_range_z: 1.2
@@ -31,6 +34,14 @@
     grid_map/local_map_margin: 8
     grid_map/ground_height: 0.0
     grid_map/use_depth_filter: false
+    # 平面判障：同一 XY 柱内相对全局路径参考高度 ref_z 的 z 带内有占据即不可通行
+    grid_map/planar_occ_check: true
+    grid_map/planar_occ_relative: true
+    grid_map/planar_occ_z_min_offset: 0.05
+    # 狗身高度约 0.35m + 0.2m 余量 = 0.55m（相对 ref_z，不可从障碍上方飞越）
+    grid_map/planar_occ_z_max_offset: 0.55
+    grid_map/planar_default_ref_z: 0.27
+    grid_map/visualization_truncate_offset: 0.65
     grid_map/p_hit: 0.65
     grid_map/p_miss: 0.35
     grid_map/p_min: 0.12
@@ -41,7 +52,6 @@
     grid_map/max_ray_length: 3.5
     # 四足禁用虚拟天花板（<0 关闭）。原 0.65 会在整片 XY 上铺一层“假障碍面”，RViz 里像一整块红板
     grid_map/virtual_ceil_height: -1.0
-    grid_map/visualization_truncate_height: 0.55
     grid_map/show_occ_time: false
     grid_map/pose_type: 1
     grid_map/frame_id: map
@@ -51,9 +61,13 @@
     manager/max_jerk: 3.0
     manager/control_points_distance: 0.32
     manager/feasibility_tolerance: 0.05
-    manager/planning_horizon: 0.8
+    manager/planning_horizon: 2.5
     manager/use_distinctive_trajs: false
     manager/drone_id: 0
+    # 四足平面模式：全局路径保留 3D Z；局部 B-spline 仍锁 ref_z（由 FSM 按进度更新）
+    manager/planar_mode: true
+    manager/preserve_global_path_z: true
+    manager/cruise_z: 0.27
 
     optimization/lambda_smooth: 1.0
     # 原 0.5，过大时轨迹会绕很远或反复 replan

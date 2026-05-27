@@ -38,7 +38,7 @@ ros2 launch go2_nav_stack nav2_mppi.launch.py
 |------|-------------|
 | 全局路径 | `dong_path` → `/planned_path`（map） |
 | 桥接 | `ego_go2_bridge`：`/lio_odom_raw`（odom 系）→ map 系 `/drone_0_state_estimation`；点云 `/cloud_registered_map` → `/drone_0_cloud_registered_map` |
-| 目标 | `ego_path_follower`：`/start_navigation` 后按路径发 `/move_base_simple/goal` |
+| 目标 | `ego_path_follower`：`/start_navigation` 后整段 `/planned_path` → `/ego_global_path` |
 | 局部规划 | `ego_planner_node` + `traj_server`（B-spline 优化） |
 | 速度 | `ego_cmd_bridge`：map 系 `pos_cmd` → `/cmd_vel`（位姿仅用 **TF map→base_link**，不订阅里程计话题） |
 
@@ -50,7 +50,7 @@ ros2 launch go2_nav_stack nav2_mppi.launch.py
 |------------------------|------|
 | `nav2_costmap_2d` → `/costmap/costmap` | EGO `grid_map` + `/drone_0_cloud_registered_map` |
 | `controller_server` + MPPI | `ego_planner_node` + `traj_server` |
-| `mppi_path_follower` | `ego_path_follower` → `/move_base_simple/goal` |
+| `mppi_path_follower` | `ego_path_follower` → `/ego_global_path`（整段路径） |
 | `nav2_controller_bringup` | 不需要 lifecycle 激活 |
 
 - EGO 为 **3D 轨迹优化**（原为多旋翼），Go2 通过 **cmd 桥接** 压成平面 `vx/wz`。
@@ -105,17 +105,15 @@ ros2 launch go2_nav_stack bringup_humble.launch.py max_vel:=0.35
 
 仍飘时可略增大 `yaw_smooth_alpha_spin`（如 0.92），或检查重定位是否用了与 ICP 同一时刻的 odom TF。
 
-## 8. 按全局路径逐点执行（默认）
+## 8. 全局路径跟踪（默认 global_path）
 
 | 节点 | 行为 |
 |------|------|
-| **ego_path_follower** | `follow_mode: per_waypoint`（默认）：**一次只盯一个路点** `wp k/N`，到点或超时后 `k→k+1` |
-| **ego_planner** | `planning_horizon` **0.8 m**（逐点模式） |
-| **ego_cmd_bridge** | `traj_yaw_weight: 0.8`、`waypoint_yaw_weight: 0.2`（行走优先、转弯次之） |
+| **ego_path_follower** | `follow_mode: global_path`（默认）：`/start_navigation` 后把**整段** `/planned_path` 发到 `/ego_global_path` |
+| **ego_planner** | 订阅 `/ego_global_path`，调用 `planGlobalTrajWaypoints` 生成全局参考轨迹；局部 `getLocalTarget` 沿该轨迹前视 |
+| **ego_cmd_bridge** | 仍订阅 `/move_base_simple/goal`（终点 fallback）；正常跟踪以 `pos_cmd` 为准 |
 
-日志：`EGO 逐点 wp 3/56 ...`
-
-可选：`follow_mode: lookahead` + `lookahead_m: 2.0` 沿路线前视，不必踩每个中间点。
+旧模式（可选）：`follow_mode: per_waypoint` 或 `lookahead` — 仍逐点发 `/move_base_simple/goal`。
 
 **障碍点云高度**（`ego_go2_bridge`）：相对 `base_link`，**激光高度 0.27 m 向下 30 cm 至向上 1.0 m** 内的点送入 EGO 栅格（`z ∈ [-0.03, 1.0]` m），作为不可通行障碍带。
 
@@ -150,21 +148,39 @@ ros2 launch go2_nav_stack bringup_humble.launch.py max_vel:=0.35
 |--------|------|------|------|
 | **GlobalPathViz** | Path | `/planned_path_viz` | 全局 A*（绿，由 `ego_traj_display` 转发，RViz 可稳定显示） |
 | **EgoExecPath** | Path | `/ego_exec_path` | EGO 实际跟踪轨迹（橙，来自 `pos_cmd`） |
+| **EgoLocalPath** | Path | `/ego_local_path` | EGO 局部 B-spline（红，来自 `bspline`，`ego_traj_display`） |
 | **GlobalPathMarker** | Marker | `/planned_path_marker` | 全局路径线（粗） |
-| **EGO_OptimalTraj** | Marker | `/drone_0_plan_vis/optimal_list` | EGO 优化轨迹点（需正在规划） |
+| **EGO_OptimalTraj** | Marker | `/drone_0_plan_vis/optimal_list` | EGO 优化控制点（红 Marker，需正在规划） |
 | **EGO_Goal** | Marker | `/drone_0_plan_vis/goal_point` | EGO 局部目标点 |
 | **EGO_OccupancyInflate** | PointCloud2 | `/drone_0_grid/grid_map/occupancy_inflate` | 局部膨胀障碍 |
+| **EgoGlobalRef** | Path | `/drone_0_plan_vis/global_ref_path` | EGO 全局参考（绿，含楼梯 Z） |
+| **EGO_GlobalInit** | Marker | `/drone_0_plan_vis/global_list` | 全局轨迹 Marker（含楼梯 Z） |
+
+**楼梯 / 3D 全局路径**：`ego_path_follower` 的 `preserve_path_z: true` 保留 `/planned_path` 各点 Z；EGO 侧须 **`manager/preserve_global_path_z: true`**（`ego_planner_core.yaml` 默认已开），否则 `planGlobalTrajWaypoints` 会把所有路点 Z 压成 `cruise_z`，`global_list` 变平面、无法按楼层爬升。`ref_z` 仍随全局路径进度更新，用于平面判障高度带。
 
 **Fixed Frame 必须为 `map`**（配置文件已设）。
 
-**路径看不到**：`/planned_path` 为 TRANSIENT_LOCAL，RViz 默认 Volatile 常收不到——请订阅 **`/planned_path_viz`** 或 **`/ego_exec_path`**（`ego_traj_display` 节点）。
+**路径看不到**：`/planned_path` 为 TRANSIENT_LOCAL，RViz 默认 Volatile 常收不到——请订阅 **`/planned_path_viz`**、**`/ego_local_path`**（红）或 **`/ego_exec_path`**（橙）。
+
+**红色局部路径**：需 EGO 进入 `EXEC_TRAJ` 并成功重规划后才有 `/drone_0_planning/bspline` → **`/ego_local_path`**。
+
+诊断前**必须先 source**（否则 `ros2 topic hz` 会报 `traj_utils/msg/Bspline is invalid`）：
+
+```bash
+source ~/navmid360/install/setup.bash
+ros2 interface show traj_utils/msg/Bspline   # 应打印字段，不应报错
+ros2 topic hz /drone_0_planning/bspline
+```
+
+或运行：`bash scripts/ros2_topic_check.sh`
 
 **`/drone_0_grid/grid_map/occupancy_inflate` 一整片面都是障碍**：来自 EGO 的 **virtual_ceil（虚拟天花板）**——在局部地图整块 XY 上、固定高度铺一层膨胀障碍（多旋翼遗留）。Go2 已在 `ego_planner_core.yaml` 设 **`virtual_ceil_height: -1.0` 关闭**。
 
-**规划完全局路径后“真障碍没了”**：
-- `occupancy_inflate` 每次先**清空局部范围**再按当前点云重建；狗若静止、或点云暂时不更新，只剩历史一帧，墙体会“消失”。
-- 看真实环境请用 RViz **`CloudRegisteredMap`**（`/cloud_registered_map`），不要只盯 inflate。
-- 开始导航后点云持续输入，inflate 会跟着更新。
+**规划/开始导航后“局部障碍没了”**：
+- `occupancy_inflate` 每帧在机体附近**先清空再按当前扫描重建**，只反映当前雷达视野，不是持久地图。
+- 导航后 `ref_z` 随全局路径变化时，旧版 RViz 裁剪会把障碍滤掉；已改为按 **机体 `camera_pos` 高度** 裁剪显示。
+- 看真实环境请用 **`CloudRegisteredMap`**（`/cloud_registered_map`），不要只盯 inflate。
+- 若仍空白：`ros2 topic hz /drone_0_cloud_registered_map` 与 `/state_estimation` 应 ~10Hz。
 - **勿**对旧点云做定时重发：狗移动后 map 系旧帧会让 EGO `occupancy_inflate` 相对机体“不刷新”。`ego_go2_bridge` 只转发 **实时** `/cloud_registered_map`；若 >0.35s 无新帧会告警。
 
 **转弯时 `/cmd_vel` 只有 ~0.03 m/s、日志 `dist_goal≈0.06m`、卡在同一 wp**：

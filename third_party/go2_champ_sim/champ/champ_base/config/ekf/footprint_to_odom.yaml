@@ -19,6 +19,12 @@ footprint_to_odom_ekf:
                     true,  true, false,
                   false, false, true,
                   false, false, false]
+    # odom0: odom/raw
+    # odom0_config: [true, true, false,
+    #               false, false, true,
+    #                 true,  true, false,
+    #               false, false, true,
+    #               false, false, false]
 
     imu0: imu/data
     imu0_config: [false, false, false,

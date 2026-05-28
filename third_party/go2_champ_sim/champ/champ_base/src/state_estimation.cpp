@@ -162,7 +162,7 @@ void StateEstimation::publishFootprintToOdom_()
     //calculate current position of the robot
     x_pos_ += delta_x;
     y_pos_ += delta_y;
-    heading_ += delta_heading;
+    heading_ +=   delta_heading;
 
     //calculate robot's heading_ in quaternion angle
     tf2::Quaternion odom_quat;

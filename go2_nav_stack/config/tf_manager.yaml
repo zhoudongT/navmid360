@@ -38,5 +38,5 @@ tf_manager_node:
     refresh_map_to_odom_stamp: false
     static_base_to_imu_xyz: [0.0, 0.0, 0.0]
     static_base_to_imu_rpy: [0.0, 0.0, 0.0]
-    static_base_to_lidar_xyz: [0.0, 0.0, 0.27]
+    static_base_to_lidar_xyz: [0.0, 0.0, 0.45]
     static_base_to_lidar_rpy: [0.0, 0.0, 0.0]

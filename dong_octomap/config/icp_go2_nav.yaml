@@ -7,5 +7,6 @@ icp_node:
     # 连续追踪关闭后该参数不再生效，但保留以便你需要时再开
     icp_result_publish_interval: 12
     publish_transformed_cloud_after_lock: true
-    # 转圈时 coarse yaw search 容易在对称环境选错候选 yaw；用于导航更稳的做法是关闭。
-    icp_coarse_yaw_search_enable: false
+    # 首次 ICP 粗 yaw 搜索：continuous_tracking=false 时仅锁定前生效，有助于 SC 粗定位偏差
+    icp_coarse_yaw_search_enable: true
+    icp_coarse_yaw_half_range_deg: 45.0

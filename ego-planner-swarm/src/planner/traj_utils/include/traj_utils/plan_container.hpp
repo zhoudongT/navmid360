@@ -2,6 +2,7 @@
 #define _PLAN_CONTAINER_H_
 
 #include <Eigen/Eigen>
+#include <algorithm>
 #include <vector>
 #include <rclcpp/rclcpp.hpp>
 
@@ -62,13 +63,23 @@ namespace ego_planner
       last_time_inc_ = time_inc;
     }
 
+    double clampGlobalTime(double t) const
+    {
+      return std::max(0.0, std::min(t, global_duration_));
+    }
+
     Eigen::Vector3d getPosition(double t)
     {
-      if (t >= -1e-3 && t <= local_start_time_)
+      t = clampGlobalTime(t);
+      if (local_traj_.empty() || local_start_time_ < 0.0 || local_end_time_ < 0.0)
+      {
+        return global_traj_.evaluate(t - time_increase_);
+      }
+      if (t <= local_start_time_ + 1e-3)
       {
         return global_traj_.evaluate(t - time_increase_ + last_time_inc_);
       }
-      else if (t >= local_end_time_ && t <= global_duration_ + 1e-3)
+      else if (t >= local_end_time_ - 1e-3)
       {
         return global_traj_.evaluate(t - time_increase_);
       }
@@ -82,11 +93,16 @@ namespace ego_planner
 
     Eigen::Vector3d getVelocity(double t)
     {
-      if (t >= -1e-3 && t <= local_start_time_)
+      t = clampGlobalTime(t);
+      if (local_traj_.empty() || local_start_time_ < 0.0 || local_end_time_ < 0.0)
+      {
+        return global_traj_.evaluateVel(t - time_increase_);
+      }
+      if (t <= local_start_time_ + 1e-3)
       {
         return global_traj_.evaluateVel(t);
       }
-      else if (t >= local_end_time_ && t <= global_duration_ + 1e-3)
+      else if (t >= local_end_time_ - 1e-3)
       {
         return global_traj_.evaluateVel(t - time_increase_);
       }
@@ -100,11 +116,16 @@ namespace ego_planner
 
     Eigen::Vector3d getAcceleration(double t)
     {
-      if (t >= -1e-3 && t <= local_start_time_)
+      t = clampGlobalTime(t);
+      if (local_traj_.empty() || local_start_time_ < 0.0 || local_end_time_ < 0.0)
+      {
+        return global_traj_.evaluateAcc(t - time_increase_);
+      }
+      if (t <= local_start_time_ + 1e-3)
       {
         return global_traj_.evaluateAcc(t);
       }
-      else if (t >= local_end_time_ && t <= global_duration_ + 1e-3)
+      else if (t >= local_end_time_ - 1e-3)
       {
         return global_traj_.evaluateAcc(t - time_increase_);
       }
@@ -199,6 +220,7 @@ namespace ego_planner
     int drone_id; // single drone: drone_id <= -1, swarm: drone_id >= 0
     bool planar_mode_; // Go2: 禁止从障碍上方飞越
     bool preserve_global_path_z_{true}; // 仅全局 minSnap 保留路径 Z；局部 B-spline 仍锁 ref_z
+    bool use_raw_global_waypoints_{true}; // true=用户路径折线跟踪，不做 minSnap 重规划
     double cruise_z_; // planar_occ 参考高度，由 FSM 按全局路径进度更新
 
     /* processing time */

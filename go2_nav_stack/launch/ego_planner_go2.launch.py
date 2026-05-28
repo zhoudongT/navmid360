@@ -106,9 +106,9 @@ def generate_launch_description():
             DeclareLaunchArgument("map_size_x", default_value="40.0"),
             DeclareLaunchArgument("map_size_y", default_value="40.0"),
             DeclareLaunchArgument("map_size_z", default_value="6.0"),
-            DeclareLaunchArgument("max_vel", default_value="0.35"),
-            DeclareLaunchArgument("max_acc", default_value="2.0"),
-            DeclareLaunchArgument("planning_horizon", default_value="2.5"),
+            DeclareLaunchArgument("max_vel", default_value="0.40"),
+            DeclareLaunchArgument("max_acc", default_value="1.0"),
+            DeclareLaunchArgument("planning_horizon", default_value="1.8"),
             OpaqueFunction(function=_launch_setup),
         ]
     )

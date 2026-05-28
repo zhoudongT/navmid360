@@ -2,6 +2,7 @@
 #define _POLYNOMIAL_TRAJ_H
 
 #include <Eigen/Eigen>
+#include <algorithm>
 #include <vector>
 
 using std::vector;
@@ -75,13 +76,18 @@ public:
 
   Eigen::Vector3d evaluate(double t)
   {
+    if (times.empty() || num_seg <= 0)
+      return Eigen::Vector3d::Zero();
+    t = std::max(0.0, std::min(t, time_sum));
+
     /* detetrmine segment num */
     int idx = 0;
-    while (times[idx] + 1e-4 < t)
+    while (idx + 1 < num_seg && times[idx] + 1e-4 < t)
     {
       t -= times[idx];
       ++idx;
     }
+    idx = std::min(idx, num_seg - 1);
 
     /* evaluation */
     int order = cxs[idx].size();
@@ -99,13 +105,18 @@ public:
 
   Eigen::Vector3d evaluateVel(double t)
   {
+    if (times.empty() || num_seg <= 0)
+      return Eigen::Vector3d::Zero();
+    t = std::max(0.0, std::min(t, time_sum));
+
     /* detetrmine segment num */
     int idx = 0;
-    while (times[idx] + 1e-4 < t)
+    while (idx + 1 < num_seg && times[idx] + 1e-4 < t)
     {
       t -= times[idx];
       ++idx;
     }
+    idx = std::min(idx, num_seg - 1);
 
     /* evaluation */
     int order = cxs[idx].size();
@@ -130,13 +141,18 @@ public:
 
   Eigen::Vector3d evaluateAcc(double t)
   {
+    if (times.empty() || num_seg <= 0)
+      return Eigen::Vector3d::Zero();
+    t = std::max(0.0, std::min(t, time_sum));
+
     /* detetrmine segment num */
     int idx = 0;
-    while (times[idx] + 1e-4 < t)
+    while (idx + 1 < num_seg && times[idx] + 1e-4 < t)
     {
       t -= times[idx];
       ++idx;
     }
+    idx = std::min(idx, num_seg - 1);
 
     /* evaluation */
     int order = cxs[idx].size();
@@ -331,6 +347,9 @@ public:
   static PolynomialTraj one_segment_traj_gen(const Eigen::Vector3d &start_pt, const Eigen::Vector3d &start_vel, const Eigen::Vector3d &start_acc,
                                              const Eigen::Vector3d &end_pt, const Eigen::Vector3d &end_vel, const Eigen::Vector3d &end_acc,
                                              double t);
+
+  static PolynomialTraj piecewiseLinearWaypointsTraj(const std::vector<Eigen::Vector3d> &waypoints,
+                                                     double max_vel);
 };
 
 #endif

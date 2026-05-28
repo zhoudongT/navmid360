@@ -56,18 +56,22 @@ namespace ego_planner
 
     /* parameters */
     int target_type_; // 1 mannual select, 2 hard code
-    double no_replan_thresh_, replan_thresh_;
+    double no_replan_thresh_, replan_thresh_, path_replan_thresh_;
     double waypoints_[50][3];
     int waypoint_num_, wp_id_;
     double planning_horizen_, planning_horizen_time_;
     double emergency_time_;
     bool flag_realworld_experiment_;
     bool enable_fail_safe_;
+    double goal_arrival_z_tol_;
     bool global_path_enable_;
     std::string global_path_topic_;
     nav_msgs::msg::Path pending_global_path_;
     bool have_pending_global_path_{false};
+    bool pending_global_replan_{false};
     size_t last_global_path_n_{0};
+    Eigen::Vector3d last_global_path_start_{Eigen::Vector3d::Zero()};
+    Eigen::Vector3d last_global_path_end_{Eigen::Vector3d::Zero()};
 
     /* planning data */
     bool have_trigger_, have_target_, have_odom_, have_new_target_, have_recv_pre_agent_;
@@ -82,6 +86,12 @@ namespace ego_planner
     Eigen::Vector3d local_target_pt_, local_target_vel_;                     // local target state
     std::vector<Eigen::Vector3d> wps_;
     int current_wp_;
+    double last_goal_dist_{1e9};
+    rclcpp::Time last_goal_progress_time_{0, 0, RCL_ROS_TIME};
+    rclcpp::Time last_path_dev_replan_time_{0, 0, RCL_ROS_TIME};
+    double progress_replan_timeout_sec_{1.4};
+    double progress_replan_min_drop_{0.18};
+    double path_replan_cooldown_sec_{2.0};
 
     bool flag_escape_emergency_;
 
@@ -110,6 +120,8 @@ namespace ego_planner
     bool planFromCurrentTraj(const int trial_times = 1);
 
     /* return value: std::pair< Times of the same state be continuously called, current continuously called state > */
+    bool isGoalReached(const Eigen::Vector3d &pos) const;
+    bool obstacleNearAhead() const;
     void changeFSMExecState(FSM_EXEC_STATE new_state, string pos_call);
     std::pair<int, EGOReplanFSM::FSM_EXEC_STATE> timesOfConsecutiveStateCalls();
     void printFSMExecState();
@@ -120,6 +132,9 @@ namespace ego_planner
     void refreshGlobalPathVisualization();
     void refreshVisualizationCallback();
     void getLocalTarget();
+    double globalPathLateralError();
+    void syncGlobalProgressToRobot();
+    bool shouldReplanForPathDeviation();
 
     /* ROS functions */
     void execFSMCallback();

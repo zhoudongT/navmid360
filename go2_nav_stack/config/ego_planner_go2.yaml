@@ -3,20 +3,27 @@ ego_go2_bridge:
     drone_id: 0
     publish_state_estimation: false
     odom_input_topic: /lio_odom_raw
-    # 直连 FAST-LIO（~10Hz）；/cloud_registered_map 经 map_cloud_display 易因 stamp-TF 失败掉到 ~1Hz
-    cloud_input_topic: /cloud_registered
-    # transformed_cloud 在转圈时易滞后；仅主点云长时间缺失时才 fallback
-    cloud_fallback_topic: /transformed_cloud
-    cloud_fallback_stale_sec: 1.2
+    # ICP 锁定后 FAST-LIO 常停 /cloud_registered；主用 map 系 /transformed_cloud（icp_node ~2Hz）
+    cloud_input_topic: /transformed_cloud
+    cloud_fallback_topic: /cloud_registered
+    cloud_fallback_stale_sec: 0.4
     map_frame: map
     tf_timeout_sec: 0.8
+    # 点云与 EGO 栅格中心必须用同一时刻 TF，勿用“最新 TF”
+    prefer_cloud_stamp_tf: true
+    cloud_tf_fallback_latest: true
+    crop_tf_fallback_latest: true
+    publish_grid_odom: true
     enable_cloud_z_crop: true
+    # 四足建议用机体系高度过滤，避免 map z 漂移导致障碍被全部裁掉
     cloud_crop_in_base_frame: true
-    lidar_height_m: 0.27
+    lidar_height_m: 0.45
+    # 离地 0.15~1.0m：base 系 z 过滤（lidar 高 0.45m => 下探 0.30m）
     obstacle_below_lidar_m: 0.30
     obstacle_max_height_above_base_m: 1.0
-    cloud_z_min_m: 0.12
-    cloud_z_max_m: 0.55
+    cloud_z_min_m: 0.15
+    cloud_z_max_m: 1.0
+    robot_body_radius_m: 0.52
     cloud_stale_warn_sec: 0.35
 
 ego_path_follower:
@@ -35,6 +42,7 @@ ego_path_follower:
     goal_z: 0.27
     preserve_path_z: true
     arrival_xy_m: 0.15
+    arrival_z_m: 0.20
     yaw_arrival_deg: 60.0
     require_yaw_arrival: false
     stuck_advance_sec: 2.0
@@ -42,7 +50,7 @@ ego_path_follower:
     stuck_advance_force_dwell_sec: 8.0
     follow_tick_hz: 10.0
     goal_heartbeat_sec: 1.0
-    global_path_republish_sec: 12.0
+    global_path_republish_sec: 0.0
     status_topic: /local_planner/status
 
 ego_traj_display:
@@ -55,7 +63,7 @@ ego_traj_display:
     global_path_in: /planned_path
     global_path_viz_out: /planned_path_viz
     trail_max_points: 120
-    local_path_segments: 12
+    local_path_segments: 10
     republish_hz: 2.0
 
 ego_cmd_bridge:
@@ -65,20 +73,24 @@ ego_cmd_bridge:
     map_frame: map
     base_frame: base_link
     tf_timeout_sec: 0.2
-    max_vx: 0.25
-    max_wz: 0.35
-    kp_vx: 0.8
-    kp_wz: 0.6
+    max_vx: 0.40
+    max_wz: 0.32
+    kp_vx: 0.95
+    kp_wz: 0.55
     ego_path_goal_topic: /move_base_simple/goal
-    min_vx: 0.05
+    min_vx: 0.09
     near_goal_dist_m: 0.60
-    near_goal_creep_vx: 0.12
-    near_goal_max_wz: 0.25
-    waypoint_yaw_weight: 0.2
-    traj_yaw_weight: 0.8
+    near_goal_creep_vx: 0.10
+    near_goal_max_wz: 0.28
+    waypoint_yaw_weight: 0.35
+    traj_yaw_weight: 0.75
+    forward_only: true
+    traj_ignore_extra_m: 0.75
+    traj_min_follow_dist_m: 0.40
+    traj_pos_lookahead_sec: 0.8
     couple_vx_wz: false
     stop_dist_cmd_m: 0.08
-    stop_dist_path_goal_m: 0.10
+    stop_dist_path_goal_m: 0.12
     cmd_stale_sec: 2.0
     drive_without_pos_cmd: true
     cmd_rate_hz: 30.0

@@ -17,20 +17,30 @@ namespace ego_planner
     node_->declare_parameter("fsm/flight_type", -1);
     node_->declare_parameter("fsm/thresh_replan_time", -1.0);
     node_->declare_parameter("fsm/thresh_no_replan_meter", -1.0);
+    node_->declare_parameter("fsm/thresh_path_replan_meter", 0.70);
+    node_->declare_parameter("fsm/path_replan_cooldown_sec", 2.0);
+    node_->declare_parameter("fsm/progress_replan_timeout_sec", 3.0);
+    node_->declare_parameter("fsm/progress_replan_min_drop_m", 0.35);
     node_->declare_parameter("fsm/planning_horizon", -1.0);
     node_->declare_parameter("fsm/planning_horizen_time", -1.0);
     node_->declare_parameter("fsm/emergency_time", 1.0);
     node_->declare_parameter("fsm/realworld_experiment", false);
     node_->declare_parameter("fsm/fail_safe", true);
+    node_->declare_parameter("fsm/goal_arrival_z_tol", 0.15);
 
     node_->get_parameter("fsm/flight_type", target_type_);
     node_->get_parameter("fsm/thresh_replan_time", replan_thresh_);
     node_->get_parameter("fsm/thresh_no_replan_meter", no_replan_thresh_);
+    node_->get_parameter("fsm/thresh_path_replan_meter", path_replan_thresh_);
+    node_->get_parameter("fsm/path_replan_cooldown_sec", path_replan_cooldown_sec_);
+    node_->get_parameter("fsm/progress_replan_timeout_sec", progress_replan_timeout_sec_);
+    node_->get_parameter("fsm/progress_replan_min_drop_m", progress_replan_min_drop_);
     node_->get_parameter("fsm/planning_horizon", planning_horizen_);
     node_->get_parameter("fsm/planning_horizen_time", planning_horizen_time_);
     node_->get_parameter("fsm/emergency_time", emergency_time_);
     node_->get_parameter("fsm/realworld_experiment", flag_realworld_experiment_);
     node_->get_parameter("fsm/fail_safe", enable_fail_safe_);
+    node_->get_parameter("fsm/goal_arrival_z_tol", goal_arrival_z_tol_);
 
     node_->declare_parameter("fsm/global_path_enable", true);
     node_->declare_parameter("fsm/global_path_topic", std::string("/ego_global_path"));
@@ -38,6 +48,7 @@ namespace ego_planner
     global_path_topic_ = node_->get_parameter("fsm/global_path_topic").as_string();
 
     have_trigger_ = !flag_realworld_experiment_;
+    last_goal_progress_time_ = node_->now();
 
     node_->declare_parameter("fsm/waypoint_num", -1);
     node_->get_parameter("fsm/waypoint_num", waypoint_num_);
@@ -270,15 +281,20 @@ namespace ego_planner
       return;
     }
 
+    const auto &path_start = path_msg.poses.front().pose.position;
     const auto &path_end = path_msg.poses.back().pose.position;
+    const Eigen::Vector3d incoming_start(path_start.x, path_start.y, path_start.z);
     const Eigen::Vector3d incoming_end(path_end.x, path_end.y, path_end.z);
-    // path_follower 心跳重发同一路径时勿反复 REPLAN（否则局部线会沿旧轨迹时间前移）
-    if (have_target_ && exec_state_ == EXEC_TRAJ && path_msg.poses.size() == last_global_path_n_ &&
-        (incoming_end - end_pt_).norm() < 0.15)
+    // 同一路径重复发布（心跳/重发）时不重算全局轨迹、不触发 REPLAN
+    if (have_target_ && path_msg.poses.size() == last_global_path_n_ &&
+        (incoming_end - last_global_path_end_).norm() < 0.05 &&
+        (incoming_start - last_global_path_start_).norm() < 0.05)
     {
       return;
     }
     last_global_path_n_ = path_msg.poses.size();
+    last_global_path_start_ = incoming_start;
+    last_global_path_end_ = incoming_end;
 
     std::vector<Eigen::Vector3d> raw_wps;
     raw_wps.reserve(path_msg.poses.size());
@@ -333,6 +349,8 @@ namespace ego_planner
     }
 
     end_pt_ = waypoints.back();
+    last_goal_dist_ = (end_pt_ - odom_pos_).head<2>().norm();
+    last_goal_progress_time_ = node_->now();
     end_vel_.setZero();
     have_target_ = true;
     have_new_target_ = true;
@@ -359,12 +377,53 @@ namespace ego_planner
         waypoints.size(), start_i, planner_manager_->global_data_.global_duration_,
         end_pt_(0), end_pt_(1), end_pt_(2));
 
-    if (exec_state_ == WAIT_TARGET)
-      changeFSMExecState(GEN_NEW_TRAJ, "GLOBAL_PATH");
-    else if (exec_state_ == EXEC_TRAJ)
+    pending_global_replan_ = true;
+
+    // 勿在 INIT 中直接 GEN_NEW_TRAJ（grid_map 可能尚未收到 odom）
+    if (exec_state_ == INIT)
+      return;
+
+    if (exec_state_ == EXEC_TRAJ && !planner_manager_->pp_.use_raw_global_waypoints_)
       changeFSMExecState(REPLAN_TRAJ, "GLOBAL_PATH");
+    else if (exec_state_ == EXEC_TRAJ)
+      pending_global_replan_ = false;
     else
       changeFSMExecState(GEN_NEW_TRAJ, "GLOBAL_PATH");
+  }
+
+  bool EGOReplanFSM::isGoalReached(const Eigen::Vector3d &pos) const
+  {
+    const double xy_err = (end_pt_.head<2>() - pos.head<2>()).norm();
+    const double z_err = std::abs(end_pt_(2) - pos(2));
+    if (planner_manager_->pp_.preserve_global_path_z_)
+      return xy_err < no_replan_thresh_ && z_err < goal_arrival_z_tol_;
+    return (end_pt_ - pos).norm() < no_replan_thresh_;
+  }
+
+  bool EGOReplanFSM::obstacleNearAhead() const
+  {
+    if (!planner_manager_ || !planner_manager_->grid_map_)
+      return false;
+
+    auto map = planner_manager_->grid_map_;
+    Eigen::Vector2d delta = (local_target_pt_ - odom_pos_).head<2>();
+    const double dist = delta.norm();
+    if (dist < 0.08)
+      return false;
+
+    const double step = 0.08;
+    const int steps = std::min(40, (int)std::ceil(dist / step));
+    Eigen::Vector3d dir(delta(0) / dist, delta(1) / dist, 0.0);
+
+    for (int i = 1; i <= steps; ++i)
+    {
+      Eigen::Vector3d p = odom_pos_ + (step * i) * dir;
+      if (planner_manager_->pp_.planar_mode_)
+        p(2) = planner_manager_->pp_.cruise_z_;
+      if (map->getInflateOccupancy(p))
+        return true;
+    }
+    return false;
   }
 
   void EGOReplanFSM::globalPathCallback(const std::shared_ptr<const nav_msgs::msg::Path> &msg)
@@ -441,6 +500,8 @@ namespace ego_planner
     odom_orient_.z() = msg->pose.pose.orientation.z;
 
     have_odom_ = true;
+
+    // 栅格位姿由 grid_map/odom（/drone_N_grid_odom，与点云同 stamp）更新，勿在此用 /state_estimation 覆盖
 
     if (have_pending_global_path_ && global_path_enable_)
     {
@@ -677,6 +738,11 @@ namespace ego_planner
     {
       if (!have_target_ || !have_trigger_)
         goto force_return;
+      if (global_path_enable_ && (have_target_ || pending_global_replan_))
+      {
+        pending_global_replan_ = false;
+        changeFSMExecState(GEN_NEW_TRAJ, "FSM");
+      }
       else
       {
         changeFSMExecState(SEQUENTIAL_START, "FSM");
@@ -714,6 +780,24 @@ namespace ego_planner
 
     case GEN_NEW_TRAJ:
     {
+      if (!have_odom_ || !have_target_)
+      {
+        goto force_return;
+      }
+      if (!planner_manager_ || !planner_manager_->grid_map_)
+      {
+        RCLCPP_WARN_THROTTLE(
+            node_->get_logger(), *node_->get_clock(), 2000,
+            "GEN_NEW_TRAJ waiting for grid_map");
+        goto force_return;
+      }
+      if (!planner_manager_->grid_map_->odomValid())
+      {
+        RCLCPP_WARN_THROTTLE(
+            node_->get_logger(), *node_->get_clock(), 2000,
+            "GEN_NEW_TRAJ waiting for grid_map odom (cloud map not ready)");
+        goto force_return;
+      }
 
       bool success = planFromGlobalTraj(10); // zx-todo
       if (success)
@@ -731,8 +815,24 @@ namespace ego_planner
 
     case REPLAN_TRAJ:
     {
+      start_pt_ = odom_pos_;
+      start_vel_ = odom_vel_;
+      start_acc_.setZero();
 
-      if (planFromCurrentTraj(1))
+      bool success =
+          (global_path_enable_ || planner_manager_->pp_.use_raw_global_waypoints_)
+              ? planFromGlobalTraj(5)
+              : planFromCurrentTraj(3);
+
+      if (!success && global_path_enable_)
+      {
+        syncGlobalProgressToRobot();
+        success = callReboundReplan(true, false);
+        if (!success)
+          success = callReboundReplan(true, true);
+      }
+
+      if (success)
       {
         changeFSMExecState(EXEC_TRAJ, "FSM");
         publishSwarmTrajs(false);
@@ -747,6 +847,29 @@ namespace ego_planner
 
     case EXEC_TRAJ:
     {
+      const double dist_to_goal_xy = (end_pt_ - odom_pos_).head<2>().norm();
+      if (dist_to_goal_xy + progress_replan_min_drop_ < last_goal_dist_)
+      {
+        last_goal_dist_ = dist_to_goal_xy;
+        last_goal_progress_time_ = node_->now();
+      }
+      else if (dist_to_goal_xy > no_replan_thresh_ * 2.0 &&
+               (node_->now() - last_goal_progress_time_).seconds() > progress_replan_timeout_sec_)
+      {
+        RCLCPP_WARN_THROTTLE(
+            node_->get_logger(), *node_->get_clock(), 2000,
+            "goal progress stalled: dist=%.2fm for %.1fs, force REPLAN",
+            dist_to_goal_xy, (node_->now() - last_goal_progress_time_).seconds());
+        changeFSMExecState(REPLAN_TRAJ, "PROGRESS_STALL");
+        break;
+      }
+
+      if (shouldReplanForPathDeviation())
+      {
+        changeFSMExecState(REPLAN_TRAJ, "PATH_DEV");
+        break;
+      }
+
       /* determine if need to replan */
       LocalTrajData *info = &planner_manager_->local_data_;
       rclcpp::Time time_now = rclcpp::Clock().now();
@@ -763,9 +886,10 @@ namespace ego_planner
         wp_id_++;
         planNextWaypoint(wps_[wp_id_]);
       }
-      else if ((local_target_pt_ - end_pt_).norm() < 1e-3) // close to the global target
+      else if ((local_target_pt_ - end_pt_).norm() < 1e-3 ||
+               (isGoalReached(odom_pos_) && (local_target_pt_ - end_pt_).head<2>().norm() < no_replan_thresh_))
       {
-        if (t_cur > info->duration_ - 1e-2)
+        if (t_cur > info->duration_ - 1e-2 || isGoalReached(odom_pos_))
         {
           have_target_ = false;
           have_trigger_ = false;
@@ -779,14 +903,24 @@ namespace ego_planner
           changeFSMExecState(WAIT_TARGET, "FSM");
           goto force_return;
         }
-        else if ((end_pt_ - pos).norm() > no_replan_thresh_ && t_cur > replan_thresh_)
+        else if (!isGoalReached(pos) && (end_pt_ - pos).head<2>().norm() > no_replan_thresh_ &&
+                 t_cur > replan_thresh_)
         {
           changeFSMExecState(REPLAN_TRAJ, "FSM");
         }
       }
       else if (t_cur > replan_thresh_)
       {
-        if (!planner_manager_->pp_.planar_mode_)
+        const double dist_to_final = (end_pt_ - odom_pos_).head<2>().norm();
+        const double path_dev =
+            global_path_enable_ ? globalPathLateralError() : 0.0;
+        // 近终点且仍贴在全局路径上时才少 REPLAN
+        if (global_path_enable_ && dist_to_final < no_replan_thresh_ * 2.0 &&
+            path_dev < path_replan_thresh_ * 0.85)
+        {
+          /* hold EXEC_TRAJ */
+        }
+        else if (!planner_manager_->pp_.planar_mode_)
         {
           changeFSMExecState(REPLAN_TRAJ, "FSM");
         }
@@ -795,8 +929,9 @@ namespace ego_planner
           const double traj_dev =
               (odom_pos_ - info->position_traj_.evaluateDeBoorT(t_cur)).norm();
           const bool robot_moving = odom_vel_.norm() > 0.06;
-          // 四足静止且 odom 未偏离执行轨迹：不按墙钟时间 replan，局部路径锚在 odom
-          if (robot_moving || traj_dev > no_replan_thresh_ * 0.5)
+          const bool obs_ahead = obstacleNearAhead();
+          if (robot_moving || traj_dev > no_replan_thresh_ * 0.35 || obs_ahead ||
+              path_dev > path_replan_thresh_)
             changeFSMExecState(REPLAN_TRAJ, "FSM");
         }
       }
@@ -848,10 +983,9 @@ namespace ego_planner
       start_acc_(2) = 0.0;
     }
 
-    bool flag_random_poly_init;
-    if (timesOfConsecutiveStateCalls().first == 1)
-      flag_random_poly_init = false;
-    else
+    bool flag_random_poly_init = false;
+    if (!planner_manager_->pp_.use_raw_global_waypoints_ &&
+        timesOfConsecutiveStateCalls().first > 1)
       flag_random_poly_init = true;
 
     for (int i = 0; i < trial_times; i++)
@@ -1135,8 +1269,73 @@ namespace ego_planner
     return true;
   }
 
+  double EGOReplanFSM::globalPathLateralError()
+  {
+    auto &gd = planner_manager_->global_data_;
+    if (gd.global_duration_ < 1e-3)
+      return 0.0;
+
+    double d_min = 1e9;
+    for (double t = 0.0; t <= gd.global_duration_ + 1e-4; t += 0.05)
+    {
+      const double d = (gd.getPosition(t) - odom_pos_).head<2>().norm();
+      if (d < d_min)
+        d_min = d;
+    }
+    return d_min;
+  }
+
+  bool EGOReplanFSM::shouldReplanForPathDeviation()
+  {
+    if (!global_path_enable_ || !have_target_ || !have_odom_)
+      return false;
+    if (planner_manager_->global_data_.global_duration_ < 1e-3)
+      return false;
+
+    const double path_dev = globalPathLateralError();
+    if (path_dev <= path_replan_thresh_)
+      return false;
+
+    const double since_last =
+        (node_->now() - last_path_dev_replan_time_).seconds();
+    if (since_last < path_replan_cooldown_sec_)
+      return false;
+
+    last_path_dev_replan_time_ = node_->now();
+    RCLCPP_WARN_THROTTLE(
+        node_->get_logger(), *node_->get_clock(), 2000,
+        "odom 偏离全局路径 %.2fm (>%.2fm)，触发 REPLAN",
+        path_dev, path_replan_thresh_);
+    return true;
+  }
+
+  void EGOReplanFSM::syncGlobalProgressToRobot()
+  {
+    auto &gd = planner_manager_->global_data_;
+    if (gd.global_duration_ < 1e-3)
+      return;
+
+    double t_best = 0.0;
+    double d_min = 1e9;
+    for (double t = 0.0; t <= gd.global_duration_ + 1e-4; t += 0.05)
+    {
+      const double d = (gd.getPosition(t) - start_pt_).head<2>().norm();
+      if (d < d_min)
+      {
+        d_min = d;
+        t_best = t;
+      }
+    }
+    if (d_min > path_replan_thresh_ * 0.85)
+      gd.last_progress_time_ = t_best;
+    else
+      gd.last_progress_time_ = std::max(gd.last_progress_time_, t_best);
+  }
+
   void EGOReplanFSM::getLocalTarget()
   {
+    syncGlobalProgressToRobot();
+
     double t;
 
     double t_step = planning_horizen_ / 20 / planner_manager_->pp_.max_vel_;
@@ -1181,6 +1380,7 @@ namespace ego_planner
       local_target_pt_ = end_pt_;
       planner_manager_->global_data_.last_progress_time_ =
           planner_manager_->global_data_.global_duration_;
+      t = planner_manager_->global_data_.global_duration_;
     }
 
     // 勿把 20m+ 外的终点当作局部目标（易生成上千控制点 → L-BFGS 栈溢出 / SIGSEGV）
@@ -1214,7 +1414,9 @@ namespace ego_planner
     }
     else
     {
-      local_target_vel_ = planner_manager_->global_data_.getVelocity(t);
+      const double t_vel = std::min(
+          t, planner_manager_->global_data_.global_duration_);
+      local_target_vel_ = planner_manager_->global_data_.getVelocity(t_vel);
     }
     if (planner_manager_->pp_.planar_mode_)
     {

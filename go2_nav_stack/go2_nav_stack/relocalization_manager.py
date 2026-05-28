@@ -6,6 +6,7 @@
   - auto_startup：开机 Scan Context + ICP
   - service：/relocalization_manager/relocalize 触发 Scan Context
   - tf_lost：导航中 TF 丢失边沿（可关）
+  - lio_weak：LIO 有效点持续偏低时周期性 ScanContext+ICP（可关，默认关）
 """
 
 from __future__ import annotations
@@ -36,9 +37,13 @@ class RelocalizationManager(Node):
         self.declare_parameter("auto_reloc_on_start", False)
         self.declare_parameter("accept_manual_initialpose", True)
         self.declare_parameter("startup_delay_sec", 10.0)
+        self.declare_parameter("startup_max_retries", 8)
+        self.declare_parameter("startup_retry_interval_sec", 4.0)
+        self.declare_parameter("icp_wait_timeout_sec", 30.0)
         self.declare_parameter("reloc_on_tf_lost_when_navigating", False)
         self.declare_parameter("tf_lost_reloc_cooldown_sec", 30.0)
         self.declare_parameter("accept_continuous_icp", True)
+        self.declare_parameter("enable_lio_weak_reloc", False)
         self.declare_parameter("lio_weak_reloc_sec", 5.0)
         self.declare_parameter("lio_weak_eff_threshold", 8)
         self.declare_parameter("lio_weak_reloc_cooldown_sec", 15.0)
@@ -80,6 +85,9 @@ class RelocalizationManager(Node):
         self._nav_state = "IDLE"
         self._prev_nav_state = "IDLE"
         self._startup_done = False
+        self._startup_attempts = 0
+        self._retry_timer = None
+        self._icp_wait_timer = None
         self._last_reloc_time = 0.0
         self._lio_weak_since: float | None = None
         self._last_lio_weak_reloc = 0.0
@@ -128,6 +136,67 @@ class RelocalizationManager(Node):
             return True
         return False
 
+    def _cancel_timer(self, timer) -> None:
+        if timer is not None:
+            try:
+                timer.cancel()
+            except Exception:
+                pass
+
+    def _cancel_startup_retry(self) -> None:
+        self._cancel_timer(self._retry_timer)
+        self._retry_timer = None
+
+    def _cancel_icp_wait(self) -> None:
+        self._cancel_timer(self._icp_wait_timer)
+        self._icp_wait_timer = None
+
+    def _start_icp_wait_timer(self) -> None:
+        self._cancel_icp_wait()
+        timeout = float(self.get_parameter("icp_wait_timeout_sec").value)
+        self._icp_wait_timer = self.create_timer(timeout, self._on_icp_wait_timeout)
+
+    def _on_icp_wait_timeout(self) -> None:
+        self._cancel_icp_wait()
+        if not self._awaiting_icp or self._reloc_locked:
+            return
+        self._awaiting_icp = False
+        self._reloc_busy = False
+        self.get_logger().warn(
+            f"等待 /icp_result 超时 ({self.get_parameter('icp_wait_timeout_sec').value:.0f}s)"
+        )
+        self._schedule_startup_retry("ICP timeout")
+
+    def _schedule_startup_retry(self, reason: str) -> None:
+        if self._reloc_locked:
+            return
+        if not bool(self.get_parameter("auto_reloc_on_start").value):
+            self._publish_status(False, reason)
+            return
+        max_retries = int(self.get_parameter("startup_max_retries").value)
+        if self._startup_attempts >= max_retries:
+            self._startup_done = True
+            self.get_logger().error(
+                f"首次定位失败：已重试 {max_retries} 次（{reason}）。"
+                "请 Qt「当前姿态」手动 /initialpose，或重建 scan_context_db"
+            )
+            self._publish_status(False, f"STARTUP_RELOC_FAILED:{reason}")
+            return
+        interval = float(self.get_parameter("startup_retry_interval_sec").value)
+        self.get_logger().warn(
+            f"首次定位未成功（{reason}），{interval:.0f}s 后重试 "
+            f"({self._startup_attempts + 1}/{max_retries})"
+        )
+        self._cancel_startup_retry()
+        self._retry_timer = self.create_timer(interval, self._startup_retry_once)
+
+    def _startup_retry_once(self) -> None:
+        self._cancel_startup_retry()
+        if self._reloc_locked:
+            return
+        self._startup_attempts += 1
+        self._trigger_reloc("startup")
+
     def _on_manual_initialpose(self, msg: PoseWithCovarianceStamped) -> None:
         """Qt「当前姿态」/ RViz 2D Pose：仅 ICP，不跑 Scan Context。"""
         if self._reloc_busy:
@@ -136,15 +205,17 @@ class RelocalizationManager(Node):
         self._ok_pub.publish(Bool(data=False))
         p = msg.pose.pose.position
         self._awaiting_icp = True
+        self._start_icp_wait_timer()
         self._status_pub.publish(String(data="MANUAL_ICP: awaiting /icp_result"))
         self.get_logger().info(
             f"Manual /initialpose ({p.x:.2f},{p.y:.2f}) -> waiting NDT/ICP /icp_result"
         )
 
     def _startup_reloc_once(self) -> None:
-        if self._startup_done:
+        if self._startup_done or self._reloc_locked:
             return
         self._startup_done = True
+        self._startup_attempts = 0
         self._trigger_reloc("startup")
 
     def _on_nav_state(self, msg: String) -> None:
@@ -170,6 +241,8 @@ class RelocalizationManager(Node):
         self._trigger_reloc("tf_lost")
 
     def _on_lio_effective(self, msg: Int32) -> None:
+        if not bool(self.get_parameter("enable_lio_weak_reloc").value):
+            return
         if not self._reloc_locked or self._reloc_busy:
             self._lio_weak_since = None
             return
@@ -229,6 +302,8 @@ class RelocalizationManager(Node):
                 return
         if not self._sc_client.wait_for_service(timeout_sec=2.0):
             self._publish_status(False, "scan_context query service not ready")
+            if reason == "startup":
+                self._schedule_startup_retry("scan_context service not ready")
             return
 
         self._reloc_busy = True
@@ -246,10 +321,15 @@ class RelocalizationManager(Node):
             self._reloc_busy = False
             self.get_logger().error(f"scan_context query failed: {ex}")
             self._publish_status(False, str(ex))
+            if reason == "startup":
+                self._schedule_startup_retry(str(ex))
             return
         if not res or not res.success:
             self._reloc_busy = False
-            self._publish_status(False, res.message if res else "query failed")
+            msg = res.message if res else "query failed"
+            self._publish_status(False, msg)
+            if reason == "startup":
+                self._schedule_startup_retry(msg)
             return
         self.get_logger().info(f"scan_context ok ({reason}): {res.message[:120]}")
 
@@ -259,6 +339,8 @@ class RelocalizationManager(Node):
         text = msg.data.strip()
         if not text:
             self._reloc_busy = False
+            if self._startup_done and not self._reloc_locked:
+                self._schedule_startup_retry("empty scan_context result")
             return
         first = text.split(";")[0].strip()
         try:
@@ -274,6 +356,8 @@ class RelocalizationManager(Node):
             self._reloc_busy = False
             self.get_logger().warn(f"parse scan_context result failed: {text}")
             self._publish_status(False, "parse failed")
+            if self._startup_done and not self._reloc_locked:
+                self._schedule_startup_retry("parse scan_context failed")
             return
 
         pose = PoseWithCovarianceStamped()
@@ -285,6 +369,7 @@ class RelocalizationManager(Node):
         pose.pose.pose.orientation = _yaw_to_quat(yaw)
         self._initial_pose_pub.publish(pose)
         self._awaiting_icp = True
+        self._start_icp_wait_timer()
         self._publish_status(True, f"SC coarse pose ({x:.2f},{y:.2f}) awaiting NDT/ICP")
         self.get_logger().info(
             f"Scan Context -> /initialpose ({x:.2f},{y:.2f}) yaw={math.degrees(yaw):.1f}°, "
@@ -305,6 +390,8 @@ class RelocalizationManager(Node):
         self._awaiting_icp = False
         self._reloc_busy = False
         self._reloc_locked = True
+        self._cancel_startup_retry()
+        self._cancel_icp_wait()
         out = PoseWithCovarianceStamped()
         out.header.stamp = msg.header.stamp
         out.header.frame_id = msg.header.frame_id or "map"

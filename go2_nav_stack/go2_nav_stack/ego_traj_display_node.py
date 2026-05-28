@@ -185,6 +185,9 @@ class EgoTrajDisplayNode(Node):
         self._publish_local_path(dense, "map", from_bspline=True)
 
     def _on_optimal_marker(self, msg: Marker) -> None:
+        # 已有 bspline 轨迹时不再用 optimal_list，避免 RViz 上出现两条来回折的线
+        if self._local_from_bspline:
+            return
         if msg.type != Marker.LINE_STRIP or len(msg.points) < 2:
             return
         pts = [(float(p.x), float(p.y), float(p.z)) for p in msg.points]

@@ -4,6 +4,8 @@
     max_iteration: 5
     point_filter_num: 1
     filter_size_surf: 0.4
+    preprocess:
+      blind: 0.2
     prior_map_match_dist_sq: 121.0
     prior_map_min_effective_points: 8
     mapping:

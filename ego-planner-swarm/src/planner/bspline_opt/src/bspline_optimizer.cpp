@@ -1,9 +1,35 @@
 #include "bspline_opt/bspline_optimizer.h"
 #include "bspline_opt/gradient_descent_optimizer.h"
+#include <algorithm>
 // using namespace std;
 
 namespace ego_planner
 {
+
+  namespace
+  {
+    bool copyReboundDirFromPrev(ControlPoints &cps, int j)
+    {
+      if (j <= 0 || j >= cps.size)
+        return false;
+      if (cps.base_point[j - 1].empty() || cps.direction[j - 1].empty())
+        return false;
+      cps.base_point[j].push_back(cps.base_point[j - 1].back());
+      cps.direction[j].push_back(cps.direction[j - 1].back());
+      return true;
+    }
+
+    bool copyReboundDirFromNext(ControlPoints &cps, int j)
+    {
+      if (j < 0 || j + 1 >= cps.size)
+        return false;
+      if (cps.base_point[j + 1].empty() || cps.direction[j + 1].empty())
+        return false;
+      cps.base_point[j].push_back(cps.base_point[j + 1].back());
+      cps.direction[j].push_back(cps.direction[j + 1].back());
+      return true;
+    }
+  } // namespace
 
   void BsplineOptimizer::setParam(rclcpp::Node::SharedPtr node)
   {
@@ -482,12 +508,35 @@ namespace ego_planner
   // 初始化控制点
   std::vector<std::pair<int, int>> BsplineOptimizer::initControlPoints(Eigen::MatrixXd &init_points, bool flag_first_init /*= true*/)
   {
+    vector<std::pair<int, int>> blank_ret;
+
+    if (!grid_map_)
+    {
+      RCLCPP_ERROR(rclcpp::get_logger("initControlPoints"), "grid_map is null");
+      return blank_ret;
+    }
+
+    if (init_points.cols() < order_ + 1)
+    {
+      RCLCPP_WARN(
+          rclcpp::get_logger("initControlPoints"),
+          "too few control points: cols=%ld order=%d", init_points.cols(), order_);
+      return blank_ret;
+    }
 
     if (flag_first_init)
     {
       cps_.clearance = dist0_;
       cps_.resize(init_points.cols());
       cps_.points = init_points;
+    }
+
+    const int j_min = order_;
+    const int j_max = static_cast<int>(init_points.cols()) - order_ - 1;
+    if (j_max < j_min)
+    {
+      RCLCPP_WARN(rclcpp::get_logger("initControlPoints"), "invalid control point range");
+      return blank_ret;
     }
 
     /*** Segment the initial trajectory according to obstacles ***/
@@ -508,6 +557,7 @@ namespace ego_planner
     // 标识片段的起点和终点是否找到
     bool flag_got_start = false, flag_got_end = false, flag_got_end_maybe = false;
     int i_end = (int)init_points.cols() - order_ - ((int)init_points.cols() - 2 * order_) / 3; // only check closed 2/3 points.
+    i_end = std::clamp(i_end, j_min, j_max);
     // 遍历所有点
     for (int i = order_; i <= i_end; ++i)
     {
@@ -633,6 +683,10 @@ namespace ego_planner
         id_up_bound = (int)(((segment_ids[i].second + segment_ids[i + 1].first) - 1.0f) / 2); // id_up_bound : -1.0f fix()
       }
 
+      id_low_bound = std::clamp(id_low_bound, j_min, j_max);
+      id_up_bound = std::clamp(id_up_bound, j_min, j_max);
+      if (id_up_bound < id_low_bound)
+        id_up_bound = id_low_bound;
       bounds[i] = std::pair<int, int>(id_low_bound, id_up_bound);
     }
 
@@ -668,6 +722,11 @@ namespace ego_planner
         adjusted_segment_ids[i].first = segment_ids[i].first;
         adjusted_segment_ids[i].second = segment_ids[i].second;
       }
+
+      adjusted_segment_ids[i].first = std::clamp(adjusted_segment_ids[i].first, j_min, j_max);
+      adjusted_segment_ids[i].second = std::clamp(adjusted_segment_ids[i].second, j_min, j_max);
+      if (adjusted_segment_ids[i].second < adjusted_segment_ids[i].first)
+        adjusted_segment_ids[i].second = adjusted_segment_ids[i].first;
 
       // cout << "final:" << "i = " << i << " first = " << adjusted_segment_ids[i].first << " second = " << adjusted_segment_ids[i].second << endl;
     }
@@ -820,22 +879,12 @@ namespace ego_planner
       {
         // 遍历交点之后的控制点
         for (int j = got_intersection_id + 1; j <= adjusted_segment_ids[i].second; ++j)
-          // 如果没被标记则将前一个控制点的信息给该点
           if (!cps_.flag_temp[j])
-          {
-            cps_.base_point[j].push_back(cps_.base_point[j - 1].back());
-            cps_.direction[j].push_back(cps_.direction[j - 1].back());
-            // cout << "AAA " << j << endl;
-          }
+            copyReboundDirFromPrev(cps_, j);
 
-        // 遍历交点前的控制点，如果没被标记用后一个控制点的数据赋值
         for (int j = got_intersection_id - 1; j >= adjusted_segment_ids[i].first; --j)
           if (!cps_.flag_temp[j])
-          {
-            cps_.base_point[j].push_back(cps_.base_point[j + 1].back());
-            cps_.direction[j].push_back(cps_.direction[j + 1].back());
-            // cout << "AAAA " << j << endl;
-          }
+            copyReboundDirFromNext(cps_, j);
 
         final_segment_ids.push_back(adjusted_segment_ids[i]);
       }
@@ -1482,17 +1531,11 @@ namespace ego_planner
         {
           for (int j = got_intersection_id + 1; j <= segment_ids[i].second; ++j)
             if (!cps_.flag_temp[j])
-            {
-              cps_.base_point[j].push_back(cps_.base_point[j - 1].back());
-              cps_.direction[j].push_back(cps_.direction[j - 1].back());
-            }
+              copyReboundDirFromPrev(cps_, j);
 
           for (int j = got_intersection_id - 1; j >= segment_ids[i].first; --j)
             if (!cps_.flag_temp[j])
-            {
-              cps_.base_point[j].push_back(cps_.base_point[j + 1].back());
-              cps_.direction[j].push_back(cps_.direction[j + 1].back());
-            }
+              copyReboundDirFromNext(cps_, j);
         }
         else
           RCLCPP_WARN(rclcpp::get_logger("check_collision_and_rebound"), "Failed to generate direction. It doesn't matter.");
@@ -1635,7 +1678,12 @@ namespace ego_planner
         double tm, tmp;
         traj.getTimeSpan(tm, tmp);
         // 计算时间步长
-        double t_step = (tmp - tm) / ((traj.evaluateDeBoorT(tmp) - traj.evaluateDeBoorT(tm)).norm() / grid_map_->getResolution());
+        const double span_len =
+            (traj.evaluateDeBoorT(tmp) - traj.evaluateDeBoorT(tm)).norm();
+        double t_step = (tmp - tm);
+        if (span_len > 1e-6)
+          t_step = (tmp - tm) / (span_len / grid_map_->getResolution());
+        t_step = std::max(t_step, 1e-3);
         // 遍历轨迹的前2/3部分进行障碍物检测
         for (double t = tm; t < tmp * 2 / 3; t += t_step) // Only check the closest 2/3 partition of the whole trajectory.
         {
@@ -1797,7 +1845,12 @@ namespace ego_planner
       UniformBspline traj = UniformBspline(cps_.points, 3, bspline_interval_);
       double tm, tmp;
       traj.getTimeSpan(tm, tmp);
-      double t_step = (tmp - tm) / ((traj.evaluateDeBoorT(tmp) - traj.evaluateDeBoorT(tm)).norm() / grid_map_->getResolution()); // Step size is defined as the maximum size that can passes throgth every gird.
+      const double span_len =
+          (traj.evaluateDeBoorT(tmp) - traj.evaluateDeBoorT(tm)).norm();
+      double t_step = (tmp - tm);
+      if (span_len > 1e-6)
+        t_step = (tmp - tm) / (span_len / grid_map_->getResolution());
+      t_step = std::max(t_step, 1e-3);
       for (double t = tm; t < tmp * 2 / 3; t += t_step)
       {
         if (grid_map_->getInflateOccupancy(traj.evaluateDeBoorT(t)))

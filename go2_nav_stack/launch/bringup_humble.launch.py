@@ -191,7 +191,7 @@ def generate_launch_description():
     ld.add_action(
         DeclareLaunchArgument(
             "reloc_startup_delay_sec",
-            default_value="6.0",
+            default_value="10.0",
             description="Livox+ICP 就绪后触发 Scan Context 的延时（秒）",
         )
     )

@@ -45,3 +45,25 @@ dong_prepend_open3d_cmake() {
     export CMAKE_PREFIX_PATH="${open3d_devel}:${CMAKE_PREFIX_PATH:-}"
   fi
 }
+
+dong_source_workspace() {
+  local ws_root="${1:?用法: dong_source_workspace /path/to/workspace}"
+  local had_nounset=0
+  [[ $- == *u* ]] && had_nounset=1
+
+  dong_source_humble || return 1
+  dong_prepend_open3d_cmake
+
+  if [[ -f "${ws_root}/install/setup.bash" ]]; then
+    set +u
+    # shellcheck source=/dev/null
+    source "${ws_root}/install/setup.bash"
+    if (( had_nounset )); then
+      set -u
+    fi
+  else
+    echo "警告: 未找到 ${ws_root}/install/setup.bash，请先 colcon build" >&2
+  fi
+
+  export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-0}"
+}

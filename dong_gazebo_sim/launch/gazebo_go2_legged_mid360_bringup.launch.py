@@ -37,12 +37,12 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     try:
-        config_pkg_share = launch_ros.substitutions.FindPackageShare(package="go2_config").find(
-            "go2_config"
-        )
+        config_pkg_share = launch_ros.substitutions.FindPackageShare(
+            package="champ_config"
+        ).find("champ_config")
     except PackageNotFoundError as exc:
         raise RuntimeError(
-            "未找到 go2_config。请先:\n"
+            "未找到 champ_config（go2_nav2_ros2）。请先:\n"
             "  bash scripts/sync_go2_champ_gazebo.sh\n"
             "  bash scripts/build_go2_champ_gazebo.sh"
         ) from exc

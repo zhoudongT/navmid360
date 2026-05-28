@@ -11,5 +11,5 @@
       swing_height: 0.03
       stance_depth: 0.01
       stance_duration: 0.28
-      # 与 go2_config/gait.yaml、CHAMP 默认一致
+      # 与 champ_config/gait.yaml、CHAMP 默认一致
       nominal_height: 0.225

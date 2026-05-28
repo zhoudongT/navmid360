@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://ros.org/wiki/xacro">
+  <!-- navmid360: IMU only (Mid-360 replaces 2D lidar) -->
+  <xacro:macro name="accessories_mid360" params="base_name base_length base_height">
+    <link name="imu_link">
+      <inertial>
+        <mass value="0.001"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <inertia ixx="1e-09" ixy="0.0" ixz="0.0" iyy="1e-09" iyz="0.0" izz="1e-09"/>
+      </inertial>
+    </link>
+    <joint name="imu_joint" type="fixed">
+      <parent link="${base_name}"/>
+      <child link="imu_link"/>
+    </joint>
+    <gazebo reference="imu_link">
+      <sensor name="imu_controller" type="imu">
+        <always_on>true</always_on>
+        <update_rate>50</update_rate>
+        <plugin name="gazebo_ros_imu_sensor" filename="libgazebo_ros_imu_sensor.so">
+          <ros>
+            <namespace>/imu</namespace>
+            <remapping>~/out:=data</remapping>
+          </ros>
+        </plugin>
+      </sensor>
+    </gazebo>
+  </xacro:macro>
+</robot>

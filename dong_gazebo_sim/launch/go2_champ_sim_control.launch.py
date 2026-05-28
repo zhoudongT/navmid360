@@ -13,9 +13,11 @@ from launch_ros.actions import Node
 
 
 def generate_launch_description():
-    go2_gait = os.path.join(
-        get_package_share_directory("go2_config"), "config", "gait", "gait.yaml"
+    sim_share = get_package_share_directory("dong_gazebo_sim")
+    default_gait = os.path.join(
+        get_package_share_directory("champ_config"), "config", "gait", "gait.yaml"
     )
+    stable_gait = os.path.join(sim_share, "config", "gait_sim_stable.yaml")
 
     delay_arg = DeclareLaunchArgument(
         "champ_control_delay_sec",
@@ -30,6 +32,10 @@ def generate_launch_description():
     desc_arg = DeclareLaunchArgument("description_path")
     joints_arg = DeclareLaunchArgument("joints_map_path")
     links_arg = DeclareLaunchArgument("links_map_path")
+    gait_arg = DeclareLaunchArgument(
+        "gait_config_path",
+        default_value=stable_gait if os.path.isfile(stable_gait) else default_gait,
+    )
 
     loco_on = IfCondition(
         PythonExpression(
@@ -49,7 +55,7 @@ def generate_launch_description():
         },
         LaunchConfiguration("joints_map_path"),
         LaunchConfiguration("links_map_path"),
-        go2_gait,
+        LaunchConfiguration("gait_config_path"),
     ]
 
     quadruped = Node(
@@ -95,6 +101,7 @@ def generate_launch_description():
             desc_arg,
             joints_arg,
             links_arg,
+            gait_arg,
             delayed,
         ]
     )

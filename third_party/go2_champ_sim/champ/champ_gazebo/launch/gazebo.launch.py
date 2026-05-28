@@ -1,5 +1,6 @@
 import os
 
+import launch
 import launch_ros
 from ament_index_python.packages import get_package_share_directory
 from launch_ros.actions import Node
@@ -26,9 +27,7 @@ def generate_launch_description():
     world_init_z = LaunchConfiguration("world_init_z")
     world_init_heading = LaunchConfiguration("world_init_heading")
     gazebo_world = LaunchConfiguration("world")
-    gz_pkg_share = launch_ros.substitutions.FindPackageShare(package="champ_gazebo").find(
-        "champ_gazebo"
-    )
+    gz_pkg_share = launch_ros.substitutions.FindPackageShare(package="champ_gazebo").find("champ_gazebo")
 
     declare_robot_name = DeclareLaunchArgument("robot_name", default_value="champ")
     declare_use_sim_time = DeclareLaunchArgument("use_sim_time", default_value="True")
@@ -36,58 +35,60 @@ def generate_launch_description():
     declare_headless = DeclareLaunchArgument("headless", default_value="False")
     declare_paused = DeclareLaunchArgument("paused", default_value="False")
     declare_lite = DeclareLaunchArgument("lite", default_value="False")
-    declare_ros_control_file = DeclareLaunchArgument(
-        "ros_control_file",
-        default_value=os.path.join(gz_pkg_share, "config/ros_control.yaml"),
-    )
-    declare_gazebo_world = DeclareLaunchArgument(
-        "world", default_value=os.path.join(gz_pkg_share, "worlds/default.world")
-    )
+    declare_ros_control_file = DeclareLaunchArgument("ros_control_file", default_value=os.path.join(gz_pkg_share, "config/ros_control.yaml"),)
+    declare_gazebo_world = DeclareLaunchArgument("world", default_value=os.path.join(gz_pkg_share, "worlds/default.world"))
     declare_world_init_x = DeclareLaunchArgument("world_init_x", default_value="0.0")
     declare_world_init_y = DeclareLaunchArgument("world_init_y", default_value="0.0")
-    declare_world_init_z = DeclareLaunchArgument("world_init_z", default_value="0.6")
-    declare_world_init_heading = DeclareLaunchArgument(
-        "world_init_heading", default_value="0.6"
-    )
+    declare_world_init_z = DeclareLaunchArgument("world_init_z", default_value="0.45")
+    declare_world_init_heading = DeclareLaunchArgument("world_init_heading", default_value="0.6")
 
-    pkg_share = launch_ros.substitutions.FindPackageShare(package="champ_description").find("champ_description")
-    default_model_path = os.path.join(pkg_share, "urdf/champ.urdf.xacro")
+    # pkg_share = launch_ros.substitutions.FindPackageShare(package="champ_description").find("champ_description")
+    # default_model_path = os.path.join(pkg_share, "urdf/champ.urdf.xacro")
 
-    declare_description_path = DeclareLaunchArgument(name="description_path", default_value=default_model_path, description="Absolute path to robot urdf file")
+    # declare_description_path = DeclareLaunchArgument(name="description_path", default_value=default_model_path, description="Absolute path to robot urdf file")
 
-    config_pkg_share = launch_ros.substitutions.FindPackageShare(
-        package="champ_config"
-    ).find("champ_config")
+    config_pkg_share = launch_ros.substitutions.FindPackageShare(package="champ_config").find("champ_config")
     
     links_config = os.path.join(config_pkg_share, "config/links/links.yaml")
-    gazebo_config = os.path.join(launch_ros.substitutions.FindPackageShare(
-        package="champ_gazebo"
-    ).find("champ_gazebo"), "config/gazebo.yaml")
-    launch_dir = os.path.join(pkg_share, "launch")
+    # gazebo_config = os.path.join(launch_ros.substitutions.FindPackageShare(package="champ_gazebo").find("champ_gazebo"), "config/gazebo.yaml")
+
+    # launch_dir = os.path.join(pkg_share, "launch")
     # Specify the actions
-    start_gazebo_server_cmd = ExecuteProcess(
-        cmd=[
-            "gzserver",
-            "-s",
-            "libgazebo_ros_init.so",
-            "-s",
-            "libgazebo_ros_factory.so",
-            gazebo_world,
-            '--ros-args',
-            '--params-file',
-            gazebo_config
-        ],
-        cwd=[launch_dir],
-        output="screen",
+    # start_gazebo_server_cmd = ExecuteProcess(
+    #     cmd=[
+    #         "gzserver",
+    #         "-s",
+    #         "libgazebo_ros_init.so",
+    #         "-s",
+    #         "libgazebo_ros_factory.so",
+    #         gazebo_world,
+    #         '--ros-args',
+    #         '--params-file',
+    #         gazebo_config
+    #     ],
+    #     cwd=[launch_dir],
+    #     output="screen",
+    # )
+
+    gazebo_ros = get_package_share_directory('gazebo_ros')
+    # Specify the actions
+    start_gazebo_server_cmd = launch.actions.IncludeLaunchDescription(
+        launch.launch_description_sources.PythonLaunchDescriptionSource(
+            os.path.join(gazebo_ros, 'launch', 'gzserver.launch.py'))
     )
 
-
-    start_gazebo_client_cmd = ExecuteProcess(
-        condition=IfCondition(PythonExpression([" not ", headless])),
-        cmd=["gzclient"],
-        cwd=[launch_dir],
-        output="screen",
+    start_gazebo_client_cmd = launch.actions.IncludeLaunchDescription(
+        launch.launch_description_sources.PythonLaunchDescriptionSource(
+            os.path.join(gazebo_ros, 'launch', 'gzclient.launch.py'))
+        # condition=IfCondition(PythonExpression(['not ', headless]))
     )
+
+    # start_gazebo_client_cmd = ExecuteProcess(
+    #     condition=IfCondition(PythonExpression([" not ", headless])),
+    #     cmd=["gzclient"],
+    #     cwd=[launch_dir],
+    #     output="screen",
+    # )
     start_gazebo_spawner_cmd = Node(
         package="gazebo_ros",
         executable="spawn_entity.py",
@@ -160,7 +161,7 @@ def generate_launch_description():
             declare_world_init_y,
             declare_world_init_z,
             declare_world_init_heading,
-            declare_description_path,
+            # declare_description_path,
             start_gazebo_server_cmd,
             start_gazebo_client_cmd,
             start_gazebo_spawner_cmd,

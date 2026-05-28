@@ -35,6 +35,7 @@ void GridMap::initMap(rclcpp::Node::SharedPtr node)
   node_->declare_parameter("grid_map/p_occ", 0.80);
   node_->declare_parameter("grid_map/min_ray_length", -0.1);
   node_->declare_parameter("grid_map/max_ray_length", -0.1);
+  node_->declare_parameter("grid_map/robot_exclusion_radius", 0.35);
   node_->declare_parameter("grid_map/visualization_truncate_height", -0.1);
   node_->declare_parameter("grid_map/virtual_ceil_height", -0.1);
   node_->declare_parameter("grid_map/virtual_ceil_yp", -0.1);
@@ -80,6 +81,7 @@ void GridMap::initMap(rclcpp::Node::SharedPtr node)
   node_->get_parameter("grid_map/p_occ", mp_.p_occ_);
   node_->get_parameter("grid_map/min_ray_length", mp_.min_ray_length_);
   node_->get_parameter("grid_map/max_ray_length", mp_.max_ray_length_);
+  node_->get_parameter("grid_map/robot_exclusion_radius", mp_.robot_exclusion_radius_);
   node_->get_parameter("grid_map/visualization_truncate_height", mp_.visualization_truncate_height_);
   node_->get_parameter("grid_map/virtual_ceil_height", mp_.virtual_ceil_height_);
   node_->get_parameter("grid_map/virtual_ceil_yp", mp_.virtual_ceil_yp_);
@@ -493,6 +495,8 @@ void GridMap::raycastProcess()
       length = (tmp - md_.camera_pos_).norm();
 
       // if (length < mp_.min_ray_length_) break;
+      if (length < mp_.min_ray_length_)
+        break;
 
       vox_idx = setCacheOccupancy(tmp, 0);
 
@@ -838,7 +842,10 @@ void GridMap::cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img)
 
   if (!md_.has_odom_)
   {
-    std::cout << "no odom!" << std::endl;
+    static rclcpp::Clock throttle_clock(RCL_STEADY_TIME);
+    RCLCPP_WARN_THROTTLE(
+        rclcpp::get_logger("grid_map"), throttle_clock, 5000,
+        "cloud ignored: no odom yet (grid_map/odom)");
     return;
   }
 
@@ -850,6 +857,7 @@ void GridMap::cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img)
 
   this->resetBuffer(md_.camera_pos_ - mp_.local_update_range_,
                     md_.camera_pos_ + mp_.local_update_range_);
+  clearRobotFootprint();
 
   pcl::PointXYZ pt;
   Eigen::Vector3d p3d, p3d_inf;
@@ -871,6 +879,14 @@ void GridMap::cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img)
   {
     pt = latest_cloud.points[i];
     p3d(0) = pt.x, p3d(1) = pt.y, p3d(2) = pt.z;
+
+    /* 机身圆柱范围内点云不计入障碍（避免自扫闪烁） */
+    if (mp_.robot_exclusion_radius_ > 1e-3)
+    {
+      const Eigen::Vector2d horiz = (p3d - md_.camera_pos_).head<2>();
+      if (horiz.norm() < mp_.robot_exclusion_radius_)
+        continue;
+    }
 
     /* point inside update range */
     Eigen::Vector3d devi = p3d - md_.camera_pos_;
@@ -1050,6 +1066,43 @@ void GridMap::publishMapInflate(bool all_info)
 }
 
 bool GridMap::odomValid() { return md_.has_odom_; }
+
+void GridMap::syncOdomPose(const Eigen::Vector3d &pos)
+{
+  md_.camera_pos_ = pos;
+  md_.has_odom_ = true;
+}
+
+void GridMap::clearRobotFootprint()
+{
+  if (!md_.has_odom_ || mp_.robot_exclusion_radius_ < 1e-3)
+    return;
+
+  const int r_xy = std::max(1, (int)std::ceil(mp_.robot_exclusion_radius_ / mp_.resolution_));
+  const int r_z = std::max(1, (int)std::ceil(0.35 / mp_.resolution_));
+
+  Eigen::Vector3i center;
+  posToIndex(md_.camera_pos_, center);
+
+  for (int dx = -r_xy; dx <= r_xy; ++dx)
+  {
+    for (int dy = -r_xy; dy <= r_xy; ++dy)
+    {
+      if (dx * dx + dy * dy > r_xy * r_xy)
+        continue;
+      for (int dz = -r_z; dz <= r_z; ++dz)
+      {
+        Eigen::Vector3i id(center(0) + dx, center(1) + dy, center(2) + dz);
+        if (!isInMap(id))
+          continue;
+        const int addr = toAddress(id);
+        md_.occupancy_buffer_inflate_[addr] = 0;
+        if (addr >= 0 && addr < (int)md_.occupancy_buffer_.size())
+          md_.occupancy_buffer_[addr] = mp_.clamp_min_log_;
+      }
+    }
+  }
+}
 
 bool GridMap::hasDepthObservation() { return md_.has_first_depth_; }
 

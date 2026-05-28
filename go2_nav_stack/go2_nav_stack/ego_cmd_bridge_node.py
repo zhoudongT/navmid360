@@ -61,6 +61,12 @@ class EgoCmdBridgeNode(Node):
         self.declare_parameter("waypoint_yaw_weight", 0.65)
         self.declare_parameter("traj_yaw_weight", 0.35)
         self.declare_parameter("couple_vx_wz", True)
+        self.declare_parameter("forward_only", True)
+        self.declare_parameter("traj_ignore_extra_m", 0.75)
+        # pos_cmd 在 t_cur 处，常落在脚下；低于此距离时改跟轨迹速度方向
+        self.declare_parameter("traj_min_follow_dist_m", 0.40)
+        # 轨迹前瞻点（position + velocity * t），避免始终跟脚下点
+        self.declare_parameter("traj_pos_lookahead_sec", 0.8)
         self.declare_parameter("stop_dist_cmd_m", 0.03)
         self.declare_parameter("stop_dist_path_goal_m", 0.06)
         self.declare_parameter("cmd_stale_sec", 1.0)
@@ -81,6 +87,16 @@ class EgoCmdBridgeNode(Node):
         self._wp_yaw_w = float(self.get_parameter("waypoint_yaw_weight").value)
         self._traj_yaw_w = float(self.get_parameter("traj_yaw_weight").value)
         self._couple_vx_wz = bool(self.get_parameter("couple_vx_wz").value)
+        self._forward_only = bool(self.get_parameter("forward_only").value)
+        self._traj_ignore_extra_m = float(
+            self.get_parameter("traj_ignore_extra_m").value
+        )
+        self._traj_min_follow = float(
+            self.get_parameter("traj_min_follow_dist_m").value
+        )
+        self._traj_pos_lookahead = float(
+            self.get_parameter("traj_pos_lookahead_sec").value
+        )
         self._stop_dist_cmd = float(self.get_parameter("stop_dist_cmd_m").value)
         self._stop_dist_path = float(self.get_parameter("stop_dist_path_goal_m").value)
         self._stale_sec = float(self.get_parameter("cmd_stale_sec").value)
@@ -346,15 +362,47 @@ class EgoCmdBridgeNode(Node):
         ) = self._goal_geometry(cmd)
         goal_bearing = math.atan2(dy, dx)
         along_wp = math.cos(yaw_err_wp)
+        drive_bearing = goal_bearing
+        drive_along = along_wp
+        drive_body = body_to_goal
+
+        # pos_cmd 常落在局部轨迹前方数米；接近路点时只用路点，避免 dist_cmd>>dist_wp 乱走
+        if (
+            use_cmd
+            and cmd is not None
+            and dist_cmd > dist_wp + self._traj_ignore_extra_m
+        ):
+            use_cmd = False
+            cmd = None
 
         if use_cmd and cmd is not None:
             cy, sy = math.cos(yaw), math.sin(yaw)
-            align = max(0.35, math.cos(yaw_err_wp))
-            vx_fb = self._kp_vx * body_to_goal * align
             vwx = float(cmd.velocity.x)
             vwy = float(cmd.velocity.y)
             vx_ff = cy * vwx + sy * vwy
-            vx = _clamp(vx_fb + vx_ff, -self._max_vx, self._max_vx)
+            vy_ff = -sy * vwx + cy * vwy
+            traj_speed = math.hypot(vx_ff, vy_ff)
+            tx = float(cmd.position.x) + vwx * self._traj_pos_lookahead
+            ty = float(cmd.position.y) + vwy * self._traj_pos_lookahead
+            dx_traj = tx - self._robot_x
+            dy_traj = ty - self._robot_y
+            dist_cmd_track = math.hypot(dx_traj, dy_traj)
+            body_to_cmd = cy * dx_traj + sy * dy_traj
+            drive_bearing = math.atan2(dy_traj, dx_traj)
+            drive_along = math.cos(yaw_err_traj)
+            drive_body = body_to_cmd
+            # traj_server 的 position 在 t_cur，dist_cmd 常 <0.2m；此时应用速度方向而非路点 body_goal
+            if dist_cmd_track < self._traj_min_follow and traj_speed > 0.04:
+                vx = _clamp(vx_ff, -self._max_vx, self._max_vx)
+                if abs(vx) < self._min_vx and abs(vx_ff) > 1e-3:
+                    vx = math.copysign(
+                        max(self._min_vx, min(self._max_vx, traj_speed)),
+                        vx_ff,
+                    )
+            else:
+                align = max(0.50, math.cos(yaw_err_traj))
+                vx_fb = self._kp_vx * body_to_cmd * align
+                vx = _clamp(vx_fb + vx_ff, -self._max_vx, self._max_vx)
             wz = (
                 float(cmd.yaw_dot)
                 + self._kp_wz * self._wp_yaw_w * yaw_err_wp
@@ -367,15 +415,23 @@ class EgoCmdBridgeNode(Node):
             )
 
         wz = _clamp(wz, -self._max_wz, self._max_wz)
-        vx, wz = self._apply_min_forward(
-            vx,
-            wz,
-            dist_wp=dist_wp,
-            body_to_goal=body_to_goal,
-            goal_bearing=goal_bearing,
-            yaw=yaw,
-            along_wp=along_wp,
-        )
+
+        # 四足：接近路点且目标在身后（走过头）时不倒车，只转向或停
+        if self._forward_only and dist_wp < self._near_goal_dist and drive_body < -0.04:
+            vx = 0.0
+            wz = _clamp(self._kp_wz * yaw_err_wp, -self._near_goal_max_wz, self._near_goal_max_wz)
+        else:
+            vx, wz = self._apply_min_forward(
+                vx,
+                wz,
+                dist_wp=dist_wp,
+                body_to_goal=drive_body,
+                goal_bearing=drive_bearing,
+                yaw=yaw,
+                along_wp=drive_along,
+            )
+            if self._forward_only and vx < 0.0:
+                vx = 0.0
 
         # 仅当距路点很近且已基本对准才停（勿用 dist_cmd，EGO 轨迹点常在脚下）
         if dist_wp < self._stop_dist_path and abs(body_to_goal) < 0.03:

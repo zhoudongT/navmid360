@@ -22,51 +22,34 @@ def generate_launch_description():
     base_frame = "base_link"
 
     config_pkg_share = launch_ros.substitutions.FindPackageShare(
-        package="champ_config"
-    ).find("champ_config")
-    descr_pkg_share = launch_ros.substitutions.FindPackageShare(
-        package="champ_description"
-    ).find("champ_description")
-    joints_config = os.path.join(config_pkg_share, "config/joints/joints.yaml")
-    ros_control_config = os.path.join(
-        config_pkg_share, "/config/ros_control/ros_control.yaml"
-    )
-    gait_config = os.path.join(config_pkg_share, "config/gait/gait.yaml")
-    links_config = os.path.join(config_pkg_share, "config/links/links.yaml")
-    default_model_path = os.path.join(descr_pkg_share, "urdf/champ.urdf.xacro")
-    default_world_path = os.path.join(config_pkg_share, "worlds/default.world")
+            package="champ_config").find("champ_config")
 
-    declare_use_sim_time = DeclareLaunchArgument(
-        "use_sim_time",
-        default_value="true",
-        description="Use simulation (Gazebo) clock if true",
-    )
-    declare_rviz = DeclareLaunchArgument(
-        "rviz", default_value="false", description="Launch rviz"
-    )
-    declare_robot_name = DeclareLaunchArgument(
-        "robot_name", default_value="champ", description="Robot name"
-    )
-    declare_lite = DeclareLaunchArgument(
-        "lite", default_value="false", description="Lite"
-    )
-    declare_ros_control_file = DeclareLaunchArgument(
-        "ros_control_file",
-        default_value=ros_control_config,
-        description="Ros control config path",
-    )
-    declare_gazebo_world = DeclareLaunchArgument(
-        "world", default_value=default_world_path, description="Gazebo world name"
-    )
+    # descr_pkg_share = launch_ros.substitutions.FindPackageShare(
+    #         package="champ_description").find("champ_description")
 
-    declare_gui = DeclareLaunchArgument(
-        "gui", default_value="true", description="Use gui"
-    )
-    declare_world_init_x = DeclareLaunchArgument("world_init_x", default_value="0.0")
-    declare_world_init_y = DeclareLaunchArgument("world_init_y", default_value="0.0")
-    declare_world_init_heading = DeclareLaunchArgument(
-        "world_init_heading", default_value="0.6"
-    )
+
+    # default_model_path       = os.path.join(descr_pkg_share, "urdf/champ.urdf.xacro")
+    joints_config            = os.path.join(config_pkg_share, "config/joints/joints.yaml")
+    links_config             = os.path.join(config_pkg_share, "config/links/links.yaml")
+    gait_config              = os.path.join(config_pkg_share, "config/gait/gait.yaml")
+    declare_use_sim_time     = DeclareLaunchArgument("use_sim_time", default_value="true", description="Use simulation (Gazebo) clock if true",)
+    declare_robot_name       = DeclareLaunchArgument("robot_name", default_value="champ", description="Robot name")
+    declare_lite             = DeclareLaunchArgument("lite", default_value="false", description="Lite")
+    declare_rviz             = DeclareLaunchArgument("rviz", default_value="false", description="Launch rviz")
+    
+    # default_world_path       = os.path.join(config_pkg_share, "worlds/outdoor.world")
+    # default_world_path       = os.path.join(config_pkg_share, "worlds/empty_world.world")
+    aws_small_warehouse_dir  = get_package_share_directory('aws_robomaker_small_warehouse_world')
+    default_world_path       = os.path.join(aws_small_warehouse_dir, 'worlds', 'no_roof_small_warehouse', 'no_roof_small_warehouse.world')
+    declare_gazebo_world     = DeclareLaunchArgument("world", default_value=default_world_path, description="Gazebo world name")
+    declare_gui              = DeclareLaunchArgument("gui", default_value="true", description="Use gui")
+    declare_world_init_x     = DeclareLaunchArgument("world_init_x", default_value="0.0")
+    declare_world_init_y     = DeclareLaunchArgument("world_init_y", default_value="0.0")
+    declare_world_init_heading = DeclareLaunchArgument("world_init_heading", default_value="0.6")
+
+
+    ros_control_config       = os.path.join(config_pkg_share, "/config/ros_control/ros_control.yaml")
+    declare_ros_control_file = DeclareLaunchArgument("ros_control_file", default_value=ros_control_config, description="Ros control config path",)
 
 
     bringup_ld = IncludeLaunchDescription(
@@ -78,7 +61,7 @@ def generate_launch_description():
             )
         ),
         launch_arguments={
-            "description_path": default_model_path,
+            # "description_path": '',
             "joints_map_path": joints_config,
             "links_map_path": links_config,
             "gait_config_path": gait_config,
@@ -93,6 +76,7 @@ def generate_launch_description():
             "close_loop_odom": "true",
         }.items(),
     )
+
 
     gazebo_ld = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(

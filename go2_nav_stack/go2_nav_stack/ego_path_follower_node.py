@@ -52,6 +52,7 @@ class EgoPathFollowerNode(Node):
         self.declare_parameter("goal_z", 0.27)
         self.declare_parameter("preserve_path_z", True)
         self.declare_parameter("arrival_xy_m", 0.15)
+        self.declare_parameter("arrival_z_m", 0.20)
         self.declare_parameter("yaw_arrival_deg", 35.0)
         self.declare_parameter("require_yaw_arrival", False)
         self.declare_parameter("stuck_advance_sec", 5.0)
@@ -59,7 +60,7 @@ class EgoPathFollowerNode(Node):
         self.declare_parameter("stuck_advance_force_dwell_sec", 8.0)
         self.declare_parameter("follow_tick_hz", 5.0)
         self.declare_parameter("goal_heartbeat_sec", 3.0)
-        self.declare_parameter("global_path_republish_sec", 12.0)
+        self.declare_parameter("global_path_republish_sec", 0.0)
         self.declare_parameter("status_topic", "/local_planner/status")
         self.declare_parameter("map_frame", "map")
         self.declare_parameter("robot_frame", "base_link")
@@ -75,6 +76,7 @@ class EgoPathFollowerNode(Node):
         self._goal_z = float(self.get_parameter("goal_z").value)
         self._preserve_path_z = bool(self.get_parameter("preserve_path_z").value)
         self._arrival = float(self.get_parameter("arrival_xy_m").value)
+        self._arrival_z = float(self.get_parameter("arrival_z_m").value)
         self._yaw_arrival = math.radians(
             float(self.get_parameter("yaw_arrival_deg").value)
         )
@@ -282,6 +284,42 @@ class EgoPathFollowerNode(Node):
         goal.pose.orientation.w = qw
         self._goal_pub.publish(goal)
 
+    def _robot_xyz(self) -> tuple[float, float, float] | None:
+        try:
+            tf = self._buffer.lookup_transform(
+                self._map_frame,
+                self._robot_frame,
+                rclpy.time.Time(),
+                timeout=rclpy.duration.Duration(seconds=self._tf_timeout),
+            )
+        except TransformException:
+            return None
+        t = tf.transform.translation
+        return float(t.x), float(t.y), float(t.z)
+
+    def _goal_reached(
+        self, x: float, y: float, z: float, *, idx: int | None = None
+    ) -> bool:
+        rxyz = self._robot_xyz()
+        if rxyz is None:
+            return False
+        rx, ry, rz = rxyz
+        xy = math.hypot(x - rx, y - ry)
+        dz = abs(z - rz)
+        if xy > self._arrival or dz > self._arrival_z:
+            return False
+        if not self._require_yaw:
+            return True
+        ryaw = self._robot_yaw()
+        if ryaw is None:
+            return True
+        wyaw = (
+            self._waypoint_yaw_rad(idx)
+            if idx is not None
+            else math.atan2(y - ry, x - rx)
+        )
+        return abs(_normalize_angle(wyaw - ryaw)) <= self._yaw_arrival
+
     def _dist_to_robot(self, x: float, y: float) -> float | None:
         try:
             tf = self._buffer.lookup_transform(
@@ -357,7 +395,7 @@ class EgoPathFollowerNode(Node):
         poses = self._path.poses
         n = len(poses)
         advanced = 0
-        pass_radius = max(self._arrival, self._stuck_radius * 0.85)
+        pass_radius = max(self._arrival, self._stuck_max_dist * 0.85)
         while self._current_wp < n - 1:
             p = poses[self._current_wp].pose.position
             d_cur = self._dist_to_robot(p.x, p.y)
@@ -475,16 +513,7 @@ class EgoPathFollowerNode(Node):
     def _waypoint_reached(self, idx: int) -> bool:
         assert self._path is not None
         p = self._path.poses[idx].pose.position
-        dist = self._dist_to_robot(p.x, p.y)
-        if dist is None or dist > self._arrival:
-            return False
-        if not self._require_yaw:
-            return True
-        ryaw = self._robot_yaw()
-        if ryaw is None:
-            return True
-        wyaw = self._waypoint_yaw_rad(idx)
-        return abs(_normalize_angle(wyaw - ryaw)) <= self._yaw_arrival
+        return self._goal_reached(p.x, p.y, p.z, idx=idx)
 
     def _tick(self) -> None:
         if not self._navigating or self._path is None or not self._path.poses:
@@ -494,12 +523,16 @@ class EgoPathFollowerNode(Node):
         now = time.monotonic()
 
         if self._global_path_mode:
+            self._advance_progress_along_route()
+            goal_i = self._lookahead_goal_index()
             end = self._path.poses[n - 1].pose.position
-            d_end = self._dist_to_robot(end.x, end.y)
-            if d_end is not None and d_end < max(self._arrival, 0.35):
+            if self._goal_reached(end.x, end.y, end.z, idx=n - 1):
                 self._finish_navigation()
                 return
-            # 仅导航开始后短时间内重发，供 planner respawn 恢复；正常行驶不再每秒 REPLAN
+            # 沿路径前视更新 /move_base_simple/goal，避免全程只盯终点导致接近时乱走/倒车
+            if goal_i != self._last_published_wp or now - self._last_publish_t >= self._heartbeat:
+                self._publish_waypoint(goal_i, force=True)
+            # 仅导航开始后短时间内重发整段路径，供 planner respawn 恢复
             if (
                 self._global_repub_sec > 0.0
                 and now - self._nav_start_t < self._global_repub_sec
@@ -549,8 +582,7 @@ class EgoPathFollowerNode(Node):
             goal_i = self._lookahead_goal_index()
             if self._current_wp >= n - 1:
                 end = self._path.poses[n - 1].pose.position
-                d_end = self._dist_to_robot(end.x, end.y)
-                if d_end is not None and d_end < max(self._arrival, 0.35):
+                if self._goal_reached(end.x, end.y, end.z, idx=n - 1):
                     self._finish_navigation()
                     return
             if goal_i != self._last_published_wp:

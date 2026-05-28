@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 编译 CHAMP Go2 腿控仿真 + go2_description（含 Mid-360 xacro）
+# 编译 go2_nav2_ros2 CHAMP Go2 腿控仿真 + go2_description（含 Mid-360 xacro）
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -15,23 +15,23 @@ set +u
 source "/opt/ros/${ROS_DISTRO:-humble}/setup.bash"
 set -u
 
-# colcon --paths 只扫描一层；champ 各包在 champ/champ_* 子目录，需逐个列出
 BUILD_PATHS=(
   "${REPO_ROOT}/go2_description"
-  "${DEST}/go2_config"
-  "${DEST}/champ_teleop"
 )
 for pkg_dir in "${DEST}"/champ/champ*; do
   [[ -f "${pkg_dir}/package.xml" ]] && BUILD_PATHS+=("${pkg_dir}")
 done
+if [[ -d "${DEST}/aws_robomaker_small_warehouse_world" ]]; then
+  BUILD_PATHS+=("${DEST}/aws_robomaker_small_warehouse_world")
+fi
 
-echo "[build-go2-champ] 编译 ${#BUILD_PATHS[@]} 个包路径（champ_bringup / champ_gazebo / go2_config …）…"
+echo "[build-go2-champ] 编译 ${#BUILD_PATHS[@]} 个包（champ_config / champ_gazebo / go2_description …）…"
 cd "${REPO_ROOT}"
 colcon build --symlink-install \
   --paths "${BUILD_PATHS[@]}" \
   --cmake-args -DPYTHON_EXECUTABLE=/usr/bin/python3
 
 echo
-echo "完成。请执行（勿在 set -u 下直接 source install/setup.bash）:"
+echo "完成。请执行:"
 echo "  source ${REPO_ROOT}/scripts/source_navmid360.sh"
-echo "  ros2 pkg prefix champ_bringup"
+echo "  ros2 pkg prefix champ_config"

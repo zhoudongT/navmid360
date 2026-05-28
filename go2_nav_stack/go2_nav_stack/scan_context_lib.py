@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import List, Tuple
 
@@ -11,6 +12,40 @@ import numpy as np
 RING_NUM = 20
 SECTOR_NUM = 60
 MAX_RADIUS = 40.0
+DEFAULT_LOCAL_RADIUS = 25.0
+
+
+def map_xy_to_body_xy(
+    xy_map: np.ndarray, cx: float, cy: float, cyaw: float
+) -> np.ndarray:
+    """将 map 系点云变换到 (cx,cy,cyaw) 处的机体坐标系（Scan Context 匹配用）。"""
+    if xy_map.size == 0:
+        return xy_map
+    dx = xy_map[:, 0].astype(np.float64) - cx
+    dy = xy_map[:, 1].astype(np.float64) - cy
+    c = math.cos(cyaw)
+    s = math.sin(cyaw)
+    bx = c * dx + s * dy
+    by = -s * dx + c * dy
+    return np.column_stack([bx, by]).astype(np.float32)
+
+
+def make_local_descriptor_from_map(
+    xy_map: np.ndarray,
+    cx: float,
+    cy: float,
+    cyaw: float,
+    local_radius: float = DEFAULT_LOCAL_RADIUS,
+) -> np.ndarray:
+    """从全局 map PCD 裁剪局部 patch，生成与 Livox 机体扫描同系的描述子。"""
+    if xy_map.size == 0:
+        return make_descriptor(xy_map)
+    dist = np.hypot(xy_map[:, 0] - cx, xy_map[:, 1] - cy)
+    mask = dist <= local_radius
+    if not np.any(mask):
+        return make_descriptor(np.zeros((0, 2), dtype=np.float32))
+    body_xy = map_xy_to_body_xy(xy_map[mask], cx, cy, cyaw)
+    return make_descriptor(body_xy)
 
 
 def _ring_index(r: np.ndarray) -> np.ndarray:

@@ -23,9 +23,9 @@ def generate_launch_description():
     map_size_z = LaunchConfiguration("map_size_z_", default="6.0")
     odometry_topic = LaunchConfiguration("odometry_topic", default="/state_estimation")
     cloud_topic = LaunchConfiguration("cloud_topic", default="cloud_registered_map")
-    max_vel = LaunchConfiguration("max_vel", default="0.35")
+    max_vel = LaunchConfiguration("max_vel", default="0.30")
     max_acc = LaunchConfiguration("max_acc", default="2.0")
-    planning_horizon = LaunchConfiguration("planning_horizon", default="6.0")
+    planning_horizon = LaunchConfiguration("planning_horizon", default="1.0")
     flight_type = LaunchConfiguration("flight_type", default="1")
     drone_id = LaunchConfiguration("drone_id", default="0")
 
@@ -75,7 +75,14 @@ def generate_launch_description():
                 "a_star_list",
                 [TextSubstitution(text="/drone_"), did, TextSubstitution(text="_plan_vis/a_star_list")],
             ),
-            ("grid_map/odom", odometry_topic),
+            (
+                "grid_map/odom",
+                [
+                    TextSubstitution(text="/drone_"),
+                    did,
+                    TextSubstitution(text="_grid_odom"),
+                ],
+            ),
             (
                 "grid_map/cloud",
                 [*abs_prefix, cloud_topic],

@@ -13,11 +13,16 @@ relocalization_manager:
     accept_manual_initialpose: true
     # 快速 360° 时 ICP 连续修正易把 map->odom 拉偏，默认关
     accept_continuous_icp: false
-    startup_delay_sec: 6.0
+    startup_delay_sec: 10.0
+    startup_max_retries: 8
+    startup_retry_interval_sec: 4.0
+    icp_wait_timeout_sec: 30.0
     # 转圈时 TF 易抖，勿触发 tf_lost 全量重定位
     reloc_on_tf_lost_when_navigating: false
     tf_lost_reloc_cooldown_sec: 20.0
-    # 转圈时 eff 点下降是正常现象，勿过早 ScanContext（会误匹配）
+    # 关闭：LIO 有效点偏低时的周期性 ScanContext+ICP（易把 map->odom 拉偏）
+    enable_lio_weak_reloc: false
+    # 仅 enable_lio_weak_reloc:=true 时生效
     lio_weak_reloc_sec: 10.0
     lio_weak_eff_threshold: 5
     lio_weak_reloc_cooldown_sec: 25.0

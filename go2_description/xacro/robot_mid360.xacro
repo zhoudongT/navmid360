@@ -2,13 +2,20 @@
 
 <robot name="go2_mid360" xmlns:xacro="http://www.ros.org/wiki/xacro">
 
-    <xacro:arg name="DEBUG" default="false"/>
+    <!-- <xacro:arg name="DEBUG" default="false"/> -->
 
     <xacro:include filename="$(find go2_description)/xacro/const.xacro"/>
     <xacro:include filename="$(find go2_description)/xacro/materials.xacro"/>
-    <xacro:include filename="$(find go2_description)/xacro/leg.xacro"/>
+    <xacro:include filename="$(find go2_description)/xacro/go2_leg.xacro"/>
+    <!-- <xacro:include filename="/home/e-yantra/unitree_ws/install/go2_description/share/go2_description/xacro/const.xacro"/>
+    <xacro:include filename="/home/e-yantra/unitree_ws/install/go2_description/share/go2_description/xacro/materials.xacro"/>
+    <xacro:include filename="/home/e-yantra/unitree_ws/install/go2_description/share/go2_description/xacro/leg.xacro"/> -->
+    <!-- <xacro:include filename="/home/e-yantra/unitree_ws/install/go2_description/share/go2_description/xacro/leg.xacro"/> -->
+    <!-- find-pkg-share -->
     <!-- <xacro:include filename="$(find go2_description)/xacro/stairs.xacro"/> -->
-    <xacro:include filename="$(find go2_description)/xacro/gazebo.xacro"/>
+
+    <!-- <xacro:include filename="$(find go2_description)/urdf/gazebo.xacro"/> -->
+
     <!-- <xacro:include filename="$(find go2_gazebo)/launch/stairs.urdf.xacro"/> -->
 
     <!-- <xacro:stairs stairs="15" xpos="0" ypos="0" zpos="0" /> -->
@@ -17,14 +24,17 @@
     <!-- Actually, the rotor will rotate and the joint is not fixed. Reduction ratio should be considered. -->
 
     <!-- Debug mode will hung up the robot, use "true" or "false" to switch it. -->
-    <xacro:if value="$(arg DEBUG)">
-        <link name="world"/>
-        <joint name="base_static_joint" type="fixed">
-            <origin rpy="0 0 0" xyz="0 0 0"/>
-            <parent link="world"/>
-            <child link="base_link"/>
-        </joint>
-    </xacro:if> 
+    <!-- <xacro:if value="$(arg DEBUG)">
+    </xacro:if>  -->
+    
+    <!-- <link name="world"/>
+    <link name="map"/>
+    <joint name="base_static_joint" type="fixed">
+        <origin rpy="0 0 0" xyz="0 0 0"/>
+        <parent link="world"/>
+        <child link="map"/>
+    </joint> -->
+    <xacro:include filename="$(find go2_description)/xacro/accessories_mid360.urdf.xacro" />
 
     <link name="base_link">
         <visual>
@@ -52,20 +62,33 @@
         <collision>
             <origin rpy="0 0 0" xyz="0 0 0"/>
             <geometry>
-                <box size="${trunk_length} ${trunk_width} ${trunk_height}"/>
+                <box size="0.3762 0.0935 0.114"/>
             </geometry>
         </collision>
         <inertial>
+            <!-- <origin rpy="0 0 0" xyz="0.021112 0 -0.005366"/> -->
             <origin rpy="0 0 0" xyz="${trunk_com_x} ${trunk_com_y} ${trunk_com_z}"/>
+            <!-- <mass value="6.921"/> -->
+            <!-- <mass value="2"/> -->
             <mass value="${trunk_mass}"/>
-            <inertia
+            <!-- <inertia 
+                ixx="0.02448" ixy="0.00012166" ixz="0.0014849"
+                iyy="0.098077" iyz="-3.12E-05"
+                izz="0.107"/>   -->
+            <inertia             
                 ixx="${trunk_ixx}" ixy="${trunk_ixy}" ixz="${trunk_ixz}"
                 iyy="${trunk_iyy}" iyz="${trunk_iyz}"
-                izz="${trunk_izz}"/>  
+                izz="${trunk_izz}"/>
         </inertial>
     </link>
 
-    <joint name="imu_joint" type="fixed">
+    <xacro:accessories_mid360 
+        base_name="base_link" 
+        base_length="0.3762"
+        base_height="0.114"
+    />
+    
+    <!-- <joint name="imu_joint" type="fixed">
         <parent link="trunk"/>
         <child link="imu_link"/>
         <origin rpy="0 0 0" xyz="0 0 0"/>
@@ -82,6 +105,7 @@
             <geometry>
                 <box size="0.001 0.001 0.001"/>
             </geometry>
+            <material name="red"/>
         </visual>
         <collision>
             <origin rpy="0 0 0" xyz="0 0 0"/>
@@ -89,8 +113,7 @@
                 <box size=".001 .001 .001"/>
             </geometry>
         </collision>
-    </link>
-
+    </link> -->
     <!--
     <joint name="load_joint" type="fixed">
         <parent link="trunk"/>
@@ -118,15 +141,37 @@
         </collision>
     </link>
 -->
+    <xacro:leg name="lf" mirror="1"  mirror_dae="True"   front_hind="1"  front_hind_dae="True"  />
+    <xacro:leg name="rf" mirror="-1" mirror_dae= "False" front_hind="1"  front_hind_dae="True"  />
+    <xacro:leg name="lh" mirror="1"  mirror_dae="True"   front_hind="-1" front_hind_dae="False" />
+    <xacro:leg name="rh" mirror="-1" mirror_dae="False"  front_hind="-1" front_hind_dae="False" />
 
-    <!-- 站立角参考 walk-these-ways-go2 / 多数 Go2 仿真 URDF（前腿大腿 0.8，后腿 1.0，小腿 -1.5） -->
-    <xacro:leg name="rf" mirror="-1" mirror_dae="False" front_hind="1"  front_hind_dae="True"  stand_hip="-0.1" stand_thigh="0.8" stand_calf="-1.5"/>
-    <xacro:leg name="lf" mirror="1"  mirror_dae="True"   front_hind="1"  front_hind_dae="True"  stand_hip="0.1"  stand_thigh="0.8" stand_calf="-1.5"/>
-    <xacro:leg name="rh" mirror="-1" mirror_dae="False" front_hind="-1" front_hind_dae="False" stand_hip="-0.1" stand_thigh="1.0" stand_calf="-1.5"/>
-    <xacro:leg name="lh" mirror="1"  mirror_dae="True"   front_hind="-1" front_hind_dae="False" stand_hip="0.1"  stand_thigh="1.0" stand_calf="-1.5"/>
+    <gazebo>
+      <plugin name="p3d_base_controller" filename="libgazebo_ros_p3d.so">
+        <ros>
+            <argument>odom:=odom/ground_truth</argument>
+        </ros>
+
+        <body_name>base_link</body_name>
+        <frame_name>world</frame_name>
+        <update_rate>10.0</update_rate>
+        <xyz_offset>0 0 0</xyz_offset>
+        <rpy_offset>0 0 0</rpy_offset>
+        <gaussian_noise>0.01</gaussian_noise>
+    </plugin>
+    </gazebo>
+
+    <gazebo>
+        <plugin filename="libgazebo_ros2_control.so" name="gazebo_ros2_control">
+            <!-- <parameters>$(find-pkg-share go2_description)/config/go2_controlgdsf.yaml</parameters> -->
+            <!-- <parameters>"${find go2_description}/config/go2_control.yaml"</parameters> -->
+            <parameters>$(find go2_description)/config/ros_control/ros_control_sim.yaml</parameters>
+            <!-- <parameters>/home/e-yantra/unitree_ws/install/go2_description/share/go2_description/config/go2_control.yaml</parameters> -->
+        </plugin>
+    </gazebo>
 
 
-  <!-- navmid360: 狗头 Mid-360；点云 pitch=19° 由 Gazebo 插件 extrinsic 与 MID360_config.json 一致 -->
+  <!-- navmid360: 狗头 Mid-360；点云 pitch=19° 与 MID360_config.json 一致 -->
   <xacro:include filename="$(find go2_description)/xacro/mid360_head_mount.xacro"/>
   <xacro:go2_mid360_head_mount parent="trunk" topic="livox/lidar"/>
 

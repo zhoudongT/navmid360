@@ -200,10 +200,18 @@ class TfManagerNode(Node):
         self._se_pub = None
         if self._republish_se:
             self._se_pub = self.create_publisher(Odometry, self._se_topic, 20)
+        self._reloc_ok_pub = self.create_publisher(Bool, "/relocalization/ok", 10)
         self.create_subscription(
             PoseWithCovarianceStamped,
             "/relocalization/pose",
             self._on_reloc_pose,
+            10,
+        )
+        # relocalization_manager 崩溃时仍可用 ICP 结果建立 map->odom
+        self.create_subscription(
+            PoseWithCovarianceStamped,
+            "/icp_result",
+            self._on_icp_result_direct,
             10,
         )
 
@@ -274,6 +282,7 @@ class TfManagerNode(Node):
         )
 
     def _apply_map_to_odom_mat(self, t_map_odom: np.ndarray, log_prefix: str) -> None:
+        first_lock = not self._reloc_applied
         pose = _mat4_to_pose(t_map_odom)
         self._map_to_odom.header.stamp = self.get_clock().now().to_msg()
         self._map_to_odom.header.frame_id = self._map_frame
@@ -295,6 +304,16 @@ class TfManagerNode(Node):
             f"{log_prefix} map->odom: xy=({pose.position.x:.2f},{pose.position.y:.2f}) "
             f"yaw={math.degrees(yaw):.1f}°"
         )
+        if first_lock:
+            self._reloc_ok_pub.publish(Bool(data=True))
+
+    def _on_icp_result_direct(self, msg: PoseWithCovarianceStamped) -> None:
+        if self._reloc_applied:
+            return
+        self.get_logger().warn(
+            "直接收到 /icp_result（relocalization_manager 可能未运行），尝试更新 map->odom"
+        )
+        self._on_reloc_pose(msg)
 
     def _seed_odom_to_base_identity(self) -> None:
         """重定位前占位 odom->base，保证 TF 树连通；收到 /state_estimation 后替换。"""

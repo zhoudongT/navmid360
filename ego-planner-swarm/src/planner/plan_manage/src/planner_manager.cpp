@@ -19,6 +19,161 @@ namespace ego_planner
       if (pp.planar_mode_)
         v(2) = 0.0;
     }
+
+    /** 沿全局折线路径采样初始控制点，优先贴全局路径，遇障再由 rebound 推开 */
+    bool sampleInitAlongGlobalTraj(GlobalTrajData &global_data, PlanParameters &pp,
+                                   const Eigen::Vector3d &start_pt,
+                                   const Eigen::Vector3d &local_target_pt,
+                                   const Eigen::Vector3d &local_target_vel,
+                                   double &ts, vector<Eigen::Vector3d> &point_set,
+                                   vector<Eigen::Vector3d> &start_end_derivatives)
+    {
+      if (global_data.global_duration_ < 1e-3)
+        return false;
+
+      double t0 = global_data.clampGlobalTime(global_data.last_progress_time_);
+      double t_closest = t0;
+      double d_min = 1e9;
+      const double t_search_lo =
+          std::max(0.0, t0 - 2.0);
+      for (double t = t_search_lo; t <= global_data.global_duration_ + 1e-4; t += 0.05)
+      {
+        const double d = (global_data.getPosition(t) - start_pt).head<2>().norm();
+        if (d < d_min)
+        {
+          d_min = d;
+          t_closest = t;
+        }
+      }
+      if (d_min > 0.28)
+      {
+        t0 = t_closest;
+        global_data.last_progress_time_ = t_closest;
+      }
+
+      const double max_arc =
+          std::min(pp.planning_horizen_ * 1.05,
+                   (local_target_pt - start_pt).norm() * 1.15 + pp.ctrl_pt_dist);
+
+      double t_end = t0;
+      double arc = 0.0;
+      Eigen::Vector3d prev = global_data.getPosition(t0);
+      const double dt_probe = std::max(ts * 0.5, 0.04);
+
+      for (double t = t0 + dt_probe; t <= global_data.global_duration_ + 1e-4; t += dt_probe)
+      {
+        const Eigen::Vector3d pt = global_data.getPosition(t);
+        arc += (pt - prev).norm();
+        prev = pt;
+        t_end = t;
+        if (arc >= max_arc || (pt - local_target_pt).norm() < pp.ctrl_pt_dist * 0.8)
+          break;
+      }
+
+      point_set.clear();
+      start_end_derivatives.clear();
+      bool flag_too_far = false;
+      ts *= 1.5;
+      do
+      {
+        ts /= 1.5;
+        point_set.clear();
+        flag_too_far = false;
+        Eigen::Vector3d robot_pt = start_pt;
+        enforcePlanarPoint(pp, robot_pt);
+        point_set.push_back(robot_pt);
+        Eigen::Vector3d last_pt = robot_pt;
+        for (double t = t0 + ts * 0.25; t <= t_end + 1e-4; t += ts)
+        {
+          Eigen::Vector3d pt = global_data.getPosition(t);
+          if ((last_pt - pt).norm() > pp.ctrl_pt_dist * 1.5)
+          {
+            flag_too_far = true;
+            break;
+          }
+          last_pt = pt;
+          enforcePlanarPoint(pp, pt);
+          point_set.push_back(pt);
+        }
+      } while (flag_too_far || point_set.size() < 7);
+
+      if (point_set.size() < 7)
+        return false;
+
+      if ((point_set.back() - local_target_pt).norm() > pp.ctrl_pt_dist * 0.5)
+      {
+        Eigen::Vector3d tail = local_target_pt;
+        enforcePlanarPoint(pp, tail);
+        point_set.push_back(tail);
+      }
+
+      const double t_vel0 = global_data.clampGlobalTime(t0);
+      const double t_vel1 = global_data.clampGlobalTime(t_end);
+      start_end_derivatives.push_back(global_data.getVelocity(t_vel0));
+      start_end_derivatives.push_back(local_target_vel);
+      start_end_derivatives.push_back(global_data.getAcceleration(t_vel0));
+      start_end_derivatives.push_back(global_data.getAcceleration(t_vel1));
+      return true;
+    }
+
+    void fillRefPtsFromGlobalTraj(GlobalTrajData &global_data, PlanParameters &pp,
+                                  int num_ref_pts, vector<Eigen::Vector3d> &ref_pts)
+    {
+      ref_pts.clear();
+      if (num_ref_pts < 3 || global_data.global_duration_ < 1e-3)
+        return;
+
+      const double t0 = global_data.clampGlobalTime(global_data.last_progress_time_);
+      double t_end = t0;
+      double arc = 0.0;
+      Eigen::Vector3d prev = global_data.getPosition(t0);
+      const double dt_probe = 0.05;
+      const double max_arc = pp.planning_horizen_ * 1.1;
+
+      for (double t = t0 + dt_probe; t <= global_data.global_duration_ + 1e-4; t += dt_probe)
+      {
+        const Eigen::Vector3d pt = global_data.getPosition(t);
+        arc += (pt - prev).norm();
+        prev = pt;
+        t_end = t;
+        if (arc >= max_arc)
+          break;
+      }
+
+      const int n = std::max(3, num_ref_pts);
+      for (int k = 0; k < n; ++k)
+      {
+        const double alpha = (n <= 1) ? 0.0 : double(k) / double(n - 1);
+        const double tg = t0 + alpha * (t_end - t0);
+        ref_pts.push_back(global_data.getPosition(global_data.clampGlobalTime(tg)));
+      }
+    }
+
+    /** 控制点沿前进方向单调，避免局部路径来回折 */
+    void straightenControlPointsForward(Eigen::MatrixXd &ctrl_pts,
+                                        const Eigen::Vector3d &fwd_hint)
+    {
+      if (ctrl_pts.cols() < 4)
+        return;
+      Eigen::Vector2d fwd = fwd_hint.head<2>();
+      if (fwd.norm() < 0.08)
+        return;
+      fwd.normalize();
+      Eigen::Vector2d prev = ctrl_pts.col(0).head<2>();
+      const double min_step = 0.04;
+      for (int i = 1; i < ctrl_pts.cols(); ++i)
+      {
+        Eigen::Vector2d cur = ctrl_pts.col(i).head<2>();
+        const double proj = (cur - prev).dot(fwd);
+        if (proj < min_step)
+        {
+          cur = prev + min_step * fwd;
+          ctrl_pts(0, i) = cur(0);
+          ctrl_pts(1, i) = cur(1);
+        }
+        prev = ctrl_pts.col(i).head<2>();
+      }
+    }
   } // namespace
 
   EGOPlannerManager::EGOPlannerManager() {}
@@ -37,6 +192,7 @@ namespace ego_planner
     node->declare_parameter("manager/drone_id", -1);
     node->declare_parameter("manager/planar_mode", true);
     node->declare_parameter("manager/preserve_global_path_z", true);
+    node->declare_parameter("manager/use_raw_global_waypoints", true);
     node->declare_parameter("manager/cruise_z", 0.27);
 
     node->get_parameter("manager/max_vel", pp_.max_vel_);
@@ -49,6 +205,7 @@ namespace ego_planner
     node->get_parameter("manager/drone_id", pp_.drone_id);
     node->get_parameter("manager/planar_mode", pp_.planar_mode_);
     node->get_parameter("manager/preserve_global_path_z", pp_.preserve_global_path_z_);
+    node->get_parameter("manager/use_raw_global_waypoints", pp_.use_raw_global_waypoints_);
     node->get_parameter("manager/cruise_z", pp_.cruise_z_);
 
     local_data_.traj_id_ = 0;
@@ -121,6 +278,18 @@ namespace ego_planner
       {
         flag_first_call = false;
         flag_force_polynomial = false;
+
+        const bool use_global_init =
+            pp_.use_raw_global_waypoints_ && !flag_randomPolyTraj &&
+            sampleInitAlongGlobalTraj(global_data_, pp_, start_pt, local_target_pt,
+                                      local_target_vel, ts, point_set, start_end_derivatives);
+
+        if (use_global_init)
+        {
+          // 初始路径已沿全局折线采样
+        }
+        else
+        {
         // 用于存储生成的轨迹
         PolynomialTraj gl_traj;
 
@@ -180,6 +349,7 @@ namespace ego_planner
         start_end_derivatives.push_back(local_target_vel);
         start_end_derivatives.push_back(gl_traj.evaluateAcc(0));
         start_end_derivatives.push_back(gl_traj.evaluateAcc(t));
+        } // end polynomial fallback init
       }
       else // Initial path generated from previous trajectory.
       {
@@ -282,6 +452,15 @@ namespace ego_planner
     // 将轨迹变为B样条轨迹
     Eigen::MatrixXd ctrl_pts, ctrl_pts_temp;
     UniformBspline::parameterizeToBspline(ts, point_set, start_end_derivatives, ctrl_pts);
+    if (ctrl_pts.cols() < 8)
+    {
+      RCLCPP_ERROR(
+          rclcpp::get_logger("ego_planner"),
+          "parameterizeToBspline failed: cols=%ld ts=%.4f points=%zu",
+          ctrl_pts.cols(), ts, point_set.size());
+      continous_failures_count_++;
+      return false;
+    }
 
     vector<std::pair<int, int>> segments;
     segments = bspline_optimizer_->initControlPoints(ctrl_pts, true);
@@ -350,6 +529,12 @@ namespace ego_planner
       return false;
     }
 
+    if (pp_.use_raw_global_waypoints_)
+    {
+      const Eigen::Vector3d fwd = local_target_pt - start_pt;
+      straightenControlPointsForward(ctrl_pts, fwd);
+    }
+
     t_start = rclcpp::Clock().now();
 
     UniformBspline pos = UniformBspline(ctrl_pts, 3, ts);
@@ -360,14 +545,17 @@ namespace ego_planner
     if (pp_.drone_id <= 0)
     {
 
-      double ratio;
+      double ratio = 1.0;
       bool flag_step_2_success = true;
-      if (!pos.checkFeasibility(ratio, false))
+      const bool need_time_realloc = !pos.checkFeasibility(ratio, false);
+      if (need_time_realloc)
       {
-        cout << "Need to reallocate time." << endl;
+        if (need_time_realloc)
+          cout << "Need to reallocate time." << endl;
 
         Eigen::MatrixXd optimal_control_points;
-        flag_step_2_success = refineTrajAlgo(pos, start_end_derivatives, ratio, ts, optimal_control_points);
+        flag_step_2_success =
+            refineTrajAlgo(pos, start_end_derivatives, ratio, ts, optimal_control_points);
         if (flag_step_2_success)
           pos = UniformBspline(optimal_control_points, 3, ts);
       }
@@ -452,13 +640,42 @@ namespace ego_planner
                                                   const std::vector<Eigen::Vector3d> &waypoints, const Eigen::Vector3d &end_vel, const Eigen::Vector3d &end_acc)
   {
 
-    // generate global reference trajectory
+    if (waypoints.empty())
+      return false;
 
     vector<Eigen::Vector3d> points;
-    points.push_back(start_pos);
+    if (pp_.use_raw_global_waypoints_)
+    {
+      points = waypoints;
+    }
+    else
+    {
+      points.push_back(start_pos);
+      for (size_t wp_i = 0; wp_i < waypoints.size(); wp_i++)
+        points.push_back(waypoints[wp_i]);
+    }
 
-    for (size_t wp_i = 0; wp_i < waypoints.size(); wp_i++)
-      points.push_back(waypoints[wp_i]);
+    if (points.size() < 2)
+    {
+      points.push_back(waypoints.back());
+      if (points.size() < 2)
+        points.insert(points.begin(), start_pos);
+    }
+
+    PolynomialTraj gl_traj;
+    auto time_now = rclcpp::Clock().now();
+
+    if (pp_.use_raw_global_waypoints_)
+    {
+      gl_traj = PolynomialTraj::piecewiseLinearWaypointsTraj(points, pp_.max_vel_);
+      if (gl_traj.getTimes().empty())
+        return false;
+      gl_traj.init();
+      global_data_.setGlobalTraj(gl_traj, time_now);
+      return true;
+    }
+
+    // generate global reference trajectory (minSnap)
 
     double total_len = 0;
     total_len += (start_pos - waypoints[0]).norm();
@@ -507,15 +724,12 @@ namespace ego_planner
     time(0) *= 2.0;
     time(time.rows() - 1) *= 2.0;
 
-    PolynomialTraj gl_traj;
     if (pos.cols() >= 3)
       gl_traj = PolynomialTraj::minSnapTraj(pos, start_vel, end_vel, start_acc, end_acc, time);
     else if (pos.cols() == 2)
       gl_traj = PolynomialTraj::one_segment_traj_gen(start_pos, start_vel, start_acc, pos.col(1), end_vel, end_acc, time(0));
     else
       return false;
-
-    auto time_now = rclcpp::Clock().now();
 
     global_data_.setGlobalTraj(gl_traj, time_now);
 
@@ -600,10 +814,19 @@ namespace ego_planner
 
     traj = UniformBspline(ctrl_pts, 3, ts);
 
-    double t_step = traj.getTimeSum() / (ctrl_pts.cols() - 3);
     bspline_optimizer_->ref_pts_.clear();
-    for (double t = 0; t < traj.getTimeSum() + 1e-4; t += t_step)
-      bspline_optimizer_->ref_pts_.push_back(traj.evaluateDeBoorT(t));
+    if (pp_.use_raw_global_waypoints_)
+    {
+      fillRefPtsFromGlobalTraj(global_data_, pp_, ctrl_pts.cols() - 3,
+                               bspline_optimizer_->ref_pts_);
+    }
+    if (bspline_optimizer_->ref_pts_.size() < 3)
+    {
+      const int n_seg = std::max(1, static_cast<int>(ctrl_pts.cols()) - 3);
+      const double t_step = traj.getTimeSum() / n_seg;
+      for (double t = 0; t < traj.getTimeSum() + 1e-4; t += t_step)
+        bspline_optimizer_->ref_pts_.push_back(traj.evaluateDeBoorT(t));
+    }
 
     bool success = bspline_optimizer_->BsplineOptimizeTrajRefine(ctrl_pts, ts, optimal_control_points);
 

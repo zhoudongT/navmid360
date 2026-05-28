@@ -1,5 +1,5 @@
 # Go2 Gazebo 仿真启动：较柔和的 JTC PID，减少 spawn/站立时乱跳
-# 参考 go2_config/ros_control.yaml；实机/高动态可仍用 ros_control.yaml
+# 参考 champ_config/ros_control.yaml；实机/高动态可仍用 go2_ros_control.yaml
 controller_manager:
   ros__parameters:
     use_sim_time: True

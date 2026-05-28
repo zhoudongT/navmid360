@@ -25,8 +25,8 @@ def generate_launch_description():
     gz_share = launch_ros.substitutions.FindPackageShare(package="champ_gazebo").find(
         "champ_gazebo"
     )
-    go2_cfg = launch_ros.substitutions.FindPackageShare(package="go2_config").find(
-        "go2_config"
+    go2_cfg = launch_ros.substitutions.FindPackageShare(package="champ_config").find(
+        "champ_config"
     )
     gazebo_ros_share = FindPackageShare("gazebo_ros")
 
@@ -55,7 +55,7 @@ def generate_launch_description():
     declare_z = DeclareLaunchArgument(
         "world_init_z",
         default_value="0.275",
-        description="与 go2_config Gazebo spawn 一致",
+        description="与 champ_config Gazebo spawn 一致",
     )
     declare_yaw = DeclareLaunchArgument("world_init_heading", default_value="0.0")
     declare_contact = DeclareLaunchArgument(

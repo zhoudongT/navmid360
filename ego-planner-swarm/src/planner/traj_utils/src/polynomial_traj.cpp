@@ -1,4 +1,5 @@
 #include <iostream>
+#include <algorithm>
 #include <traj_utils/polynomial_traj.h>
 
 PolynomialTraj PolynomialTraj::minSnapTraj(const Eigen::MatrixXd &Pos, const Eigen::Vector3d &start_vel,
@@ -220,5 +221,30 @@ PolynomialTraj PolynomialTraj::one_segment_traj_gen(const Eigen::Vector3d &start
   PolynomialTraj poly_traj;
   poly_traj.addSegment(cx, cy, cz, t);
 
+  return poly_traj;
+}
+
+PolynomialTraj PolynomialTraj::piecewiseLinearWaypointsTraj(
+    const std::vector<Eigen::Vector3d> &waypoints, double max_vel)
+{
+  PolynomialTraj poly_traj;
+  if (waypoints.size() < 2 || max_vel < 1e-3)
+    return poly_traj;
+
+  const double min_dt = 0.05;
+  for (size_t i = 0; i + 1 < waypoints.size(); ++i)
+  {
+    const Eigen::Vector3d &p0 = waypoints[i];
+    const Eigen::Vector3d &p1 = waypoints[i + 1];
+    const double dt = std::max((p1 - p0).norm() / max_vel, min_dt);
+    std::vector<double> cx(2), cy(2), cz(2);
+    cx[0] = (p1(0) - p0(0)) / dt;
+    cy[0] = (p1(1) - p0(1)) / dt;
+    cz[0] = (p1(2) - p0(2)) / dt;
+    cx[1] = p0(0);
+    cy[1] = p0(1);
+    cz[1] = p0(2);
+    poly_traj.addSegment(cx, cy, cz, dt);
+  }
   return poly_traj;
 }

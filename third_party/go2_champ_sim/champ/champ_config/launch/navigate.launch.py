@@ -19,12 +19,19 @@ from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.substitutions import FindPackageShare
 
+from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
     this_package = FindPackageShare('champ_config')
+    this_package = FindPackageShare('champ_config')
+    aws_small_warehouse_dir  = get_package_share_directory('aws_robomaker_small_warehouse_world')
 
+
+    # default_map_path = PathJoinSubstitution(
+    #     [this_package, 'maps', 'map.yaml']
+    # )
     default_map_path = PathJoinSubstitution(
-        [this_package, 'maps', 'map.yaml']
+        [aws_small_warehouse_dir, 'maps', '005', 'map.yaml']
     )
 
     default_params_file_path = PathJoinSubstitution(
@@ -56,7 +63,7 @@ def generate_launch_description():
 
         DeclareLaunchArgument(
             name='rviz', 
-            default_value='false',
+            default_value='true',
             description='Run rviz'
         ),
 

@@ -117,8 +117,18 @@ class ScanContextManager(Node):
         candidates = candidates[:top_k]
         if not candidates:
             res.success = False
-            res.message = "no scan context match"
+            res.message = "no scan context match (db 描述子与当前扫描不匹配，请重建 scan_context_db)"
             return res
+        best_d = candidates[0][0]
+        if len(self._entries) < 3:
+            self.get_logger().warn(
+                f"scan_context_db 仅 {len(self._entries)} 条 keyframe，粗定位覆盖范围有限"
+            )
+        if best_d > max_d * 0.85:
+            self.get_logger().warn(
+                f"Scan Context 最佳匹配距离 {best_d:.3f} 偏大（阈值 {max_d}），"
+                "ICP 可能失败，请检查 scan_context_db 或手动 /initialpose"
+            )
         lines = [
             f"x={c[1]:.2f} y={c[2]:.2f} yaw={c[3]:.2f} d={c[0]:.3f}"
             for c in candidates

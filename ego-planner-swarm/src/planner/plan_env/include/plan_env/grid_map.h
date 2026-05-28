@@ -77,6 +77,7 @@ struct MappingParameters
   double prob_hit_log_, prob_miss_log_, clamp_min_log_, clamp_max_log_,
       min_occupancy_log_;                  // logit of occupancy probability
   double min_ray_length_, max_ray_length_; // range of doing raycasting
+  double robot_exclusion_radius_; // 机身圆柱内点云不计入障碍
 
   /* local map update and clear */
   int local_map_margin_;
@@ -196,6 +197,8 @@ public:
 
   bool hasDepthObservation();
   bool odomValid();
+  /** FSM 收到里程计后同步，避免点云先于 grid_map/odom 订阅触发 */
+  void syncOdomPose(const Eigen::Vector3d &pos);
   void getRegion(Eigen::Vector3d &ori, Eigen::Vector3d &size);
   inline double getResolution();
   Eigen::Vector3d getOrigin();
@@ -217,6 +220,8 @@ private:
   void depthOdomCallback(const sensor_msgs::msg::Image::ConstPtr &img, const nav_msgs::msg::Odometry::ConstPtr &odom);
   void cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img);
   void odomCallback(const nav_msgs::msg::Odometry::SharedPtr odom);
+  /** 清除机身圆柱内已膨胀障碍，避免自扫/腿部点云当障碍 */
+  void clearRobotFootprint();
 
   // update occupancy by raycasting
   void updateOccupancyCallback();

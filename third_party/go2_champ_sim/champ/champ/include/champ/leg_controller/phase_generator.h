@@ -61,6 +61,7 @@ namespace champ
             {
                 unsigned long elapsed_time_ref = 0;
                 float swing_phase_period = 0.25f * SECONDS_TO_MICROS;
+                // float swing_phase_period = 0.4f * SECONDS_TO_MICROS;
                 float leg_clocks[4] = {0.0f,0.0f,0.0f,0.0f};
                 float stance_phase_period =  base_->gait_config.stance_duration * SECONDS_TO_MICROS;
                 float stride_period = stance_phase_period + swing_phase_period;

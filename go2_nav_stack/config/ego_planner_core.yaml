@@ -44,12 +44,14 @@
     grid_map/ground_height: 0.0
     grid_map/use_depth_filter: false
     grid_map/planar_occ_check: true
-    grid_map/planar_occ_relative: true
-    # 离地 0.15~1.0m（激光高度 0.45m）
-    grid_map/planar_occ_z_min_offset: -0.30
-    grid_map/planar_occ_z_max_offset: 0.55
-    grid_map/planar_default_ref_z: 0.45
-    grid_map/visualization_truncate_offset: 0.65
+    # map 系绝对高度带（较原 0.17~1.0m 整体下移 0.35m）
+    grid_map/planar_occ_relative: false
+    grid_map/planar_occ_z_min: -0.18
+    grid_map/planar_occ_z_max: 0.65
+    grid_map/planar_occ_z_min_offset: -0.45
+    grid_map/planar_occ_z_max_offset: 0.38
+    grid_map/planar_default_ref_z: 0.27
+    grid_map/visualization_truncate_offset: 0.30
     grid_map/p_hit: 0.72
     grid_map/p_miss: 0.38
     grid_map/p_min: 0.12

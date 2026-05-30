@@ -1,6 +1,10 @@
 # Go2 导航：ICP 持续跟踪，周期性修正 map->odom（配合 tf_manager allow_icp_refine）
 icp_node:
   ros__parameters:
+    initialpose_z_is_ground: true
+    ground_to_lidar_z_m: 0.50
+    initialpose_is_base_link: false
+    base_to_lidar_z_m: 0.50
     # 导航时运动/转圈容易出现几何退化（尤其 180° 对称场景），continuous_tracking 可能造成 map->odom 错误跳变。
     # 建议只在重定位触发时发布一次可靠解，由 tf_manager 更新 map->odom；运动中不持续追踪。
     continuous_tracking: false
@@ -10,3 +14,7 @@ icp_node:
     # 首次 ICP 粗 yaw 搜索：continuous_tracking=false 时仅锁定前生效，有助于 SC 粗定位偏差
     icp_coarse_yaw_search_enable: true
     icp_coarse_yaw_half_range_deg: 45.0
+    # 路径附近局部先验图 ICP（非全图配准）
+    use_submap_icp: true
+    submap_radius_xy_m: 25.0
+    submap_min_points: 800

@@ -1,6 +1,6 @@
 # Go2 + Mid-360 顶装 + FAST-LIO2 重定位导航（map/odom/base_link 由定位 launch 发布）
 # 请按本机路径修改 map_package_dir / relocalization_* 文件
-# 全局路径 z 补偿在 go2_nav.launch.py 的 path_z_offset_m（默认 0.45，与雷达高度一致）
+# 全局路径 z 补偿在 go2_nav.launch.py 的 path_z_offset_m（默认 0.0，使用地图真实高度）
 
 relocalization_bin_file: /home/allen/maps/relocalization.bin
 relocalization_pcd_file: /home/allen/maps/scans_0.5m.pcd

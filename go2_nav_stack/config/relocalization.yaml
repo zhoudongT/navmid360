@@ -2,7 +2,11 @@ scan_context_manager:
   ros__parameters:
     maps_root: /home/allen/maps
     scan_context_db: scan_context_db.json
+    # whole_building | path_corridor（有 /planned_path 时优先路径走廊）
     search_scope: whole_building
+    path_corridor_margin_m: 22.0
+    path_search_backward_points: 50
+    path_search_forward_points: 100
     top_k: 10
     max_ring_distance: 0.35
     min_similarity_score: 0.15

@@ -3,7 +3,7 @@
     # Go2 背载 Mid-360：水平安装在机身顶部，扫描朝天（宇树 Edu+ 常见支架姿态）。
     # extrinsic_* 为 LiDAR 在机身 IMU 坐标系下的位姿（FAST-LIO 定义）。
     # 默认 Mid-360 内置 IMU（/livox/imu）。若改用 Go2 机身 IMU，改为 /imu/data 并调整 extrinsic：
-    #   extrinsic_T: [ -0.011, -0.02329, 0.04412 ]
+    #   extrinsic_T: [ 0.17, 0.0, 0.45 ]
     feature_extract_enable: false
     point_filter_num: 3
     max_iteration: 3
@@ -38,7 +38,7 @@
       fov_degree: 360.0
       det_range: 100.0
       extrinsic_est_en: true
-      extrinsic_T: [ -0.011, -0.02329, 0.04412 ]
+      extrinsic_T: [ 0.17, 0.0, 0.45 ]
       extrinsic_R: [ 1., 0., 0.,
                      0., 1., 0.,
                      0., 0., 1.]

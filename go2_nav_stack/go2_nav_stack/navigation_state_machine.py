@@ -48,7 +48,9 @@ class NavigationStateMachine(Node):
         elif ps in (
             "MPPI_FOLLOWING",
             "EGO_FOLLOWING",
+            "FAR_FOLLOWING",
             "PATH_READY",
+            "PRE_ALIGN",
             "ESCAPE_BACKUP",
             "ESCAPE_ROTATE",
         ):

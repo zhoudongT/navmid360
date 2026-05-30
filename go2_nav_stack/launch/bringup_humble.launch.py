@@ -1,11 +1,14 @@
-"""SingleMap：Livox + FAST-LIO2 + ICP + TF + EGO 局部规划。
+"""SingleMap：Livox + FAST-LIO2 + ICP + TF + 局部规划（EGO 或 FAR）。
 
 用法::
 
+    # 默认 EGO
     ros2 launch go2_nav_stack bringup_humble.launch.py
 
-局部避障由 ego-planner 内部 grid_map 完成，不再启动 Nav2 MPPI / costmap。
-若需旧版 MPPI：ros2 launch go2_nav_stack nav2_mppi.launch.py（单独开）
+    # CMU FAR Planner（需先 build_far_planner_humble.sh）
+    ros2 launch go2_nav_stack bringup_humble.launch.py local_planner:=far
+
+局部规划：ego=EGO-Planner；far=CMU FAR；mppi=走廊+MPPI（推荐有全局路径时）。
 """
 
 from __future__ import annotations
@@ -15,9 +18,9 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
-from launch.conditions import IfCondition
+from launch.conditions import IfCondition, UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
@@ -28,6 +31,10 @@ def generate_launch_description():
     cfg = os.path.join(go2_share, "config")
     frames_cfg = os.path.join(cfg, "frame_config.yaml")
     ego_launch = os.path.join(go2_share, "launch", "ego_planner_go2.launch.py")
+    far_launch = os.path.join(go2_share, "launch", "far_planner_go2.launch.py")
+    local_planner = LaunchConfiguration("local_planner")
+    corridor_launch = os.path.join(go2_share, "launch", "corridor_mppi.launch.py")
+    corridor_cfg = os.path.join(cfg, "corridor_mppi.yaml")
 
     maps_root = LaunchConfiguration("maps_root")
     prior_pcd = LaunchConfiguration("prior_pcd_path")
@@ -40,7 +47,8 @@ def generate_launch_description():
         dong_share, "launch", "mid360_fastlio2_localization.launch.py"
     )
 
-    rviz_go2_cfg = os.path.join(go2_share, "config", "rviz_go2_nav.rviz")
+    rviz_go2_ego_cfg = os.path.join(go2_share, "config", "rviz_go2_nav.rviz")
+    rviz_go2_far_cfg = os.path.join(go2_share, "config", "rviz_go2_nav_far.rviz")
     fastlio_go2_cfg = os.path.join(dong_share, "config", "fastlio_go2_prior_map.yaml")
     icp_go2_cfg = os.path.join(dong_share, "config", "icp_go2_nav.yaml")
 
@@ -52,8 +60,8 @@ def generate_launch_description():
             "locate_in_prior_map": "true",
             "icp_planar_constraint": "true",
             "launch_rviz": launch_rviz,
-            "rviz_config": rviz_go2_cfg,
-            "publish_base_tf": "true",
+            "rviz_config": LaunchConfiguration("rviz_config"),
+            "publish_base_tf": "false",
             "send_odom_base_tf": "false",
             "enable_transform_publisher": "false",
             "odom_output_topic": "/lio_odom_raw",
@@ -144,11 +152,43 @@ def generate_launch_description():
         ),
         Node(
             package="go2_nav_stack",
+            executable="global_path_manager",
+            output="screen",
+            parameters=[corridor_cfg],
+            condition=IfCondition(
+                PythonExpression(
+                    ["'", local_planner, "' == 'mppi'"]
+                )
+            ),
+        ),
+        Node(
+            package="go2_nav_stack",
             executable="global_path_server",
             output="screen",
         ),
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(ego_launch),
+            condition=IfCondition(
+                PythonExpression(
+                    ["'", local_planner, "' == 'ego'"]
+                )
+            ),
+        ),
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(far_launch),
+            condition=IfCondition(
+                PythonExpression(
+                    ["'", local_planner, "' == 'far'"]
+                )
+            ),
+        ),
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(corridor_launch),
+            condition=IfCondition(
+                PythonExpression(
+                    ["'", local_planner, "' == 'mppi'"]
+                )
+            ),
         ),
         Node(
             package="go2_nav_stack",
@@ -158,6 +198,20 @@ def generate_launch_description():
     ]
 
     ld = LaunchDescription()
+    ld.add_action(
+        DeclareLaunchArgument(
+            "local_planner",
+            default_value="ego",
+            description="局部规划器: ego | far | mppi（走廊+MPPI）",
+        )
+    )
+    ld.add_action(
+        DeclareLaunchArgument(
+            "rviz_config",
+            default_value=rviz_go2_ego_cfg,
+            description="RViz 配置；FAR 模式请用 rviz_go2_nav_far.rviz",
+        )
+    )
     ld.add_action(DeclareLaunchArgument("maps_root", default_value="/home/allen/maps"))
     ld.add_action(
         DeclareLaunchArgument(

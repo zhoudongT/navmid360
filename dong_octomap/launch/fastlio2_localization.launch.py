@@ -138,15 +138,8 @@ def _launch_setup(context, *args, **kwargs):
             )
         )
 
-    # go2_nav_stack：tf_manager 发 base->livox；此处仅 livox->imu（FAST-LIO sensor_frame）
-    nodes.append(
-        Node(
-            package="tf2_ros",
-            executable="static_transform_publisher",
-            name="livox_to_imu_static_tf",
-            arguments=["0", "0", "0", "0", "0", "0", "livox_frame", "imu_link"],
-        )
-    )
+    # go2_nav_stack：tf_manager 发 base->imu（单位阵）与 base->livox（extrinsic）；
+    # 勿再发 livox->imu 单位阵，否则会与 extrinsic 冲突、把雷达高度当地面。
     if publish_base_tf:
         nodes.append(
             Node(
@@ -327,7 +320,7 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "publish_base_tf",
                 default_value="true",
-                description="发布 livox_frame->imu_link、base_link->imu_link 静态 TF",
+                description="发布 base_link->imu_link 静态 TF（go2 由 tf_manager 接管，请保持 false）",
             ),
             DeclareLaunchArgument(
                 "send_odom_base_tf",

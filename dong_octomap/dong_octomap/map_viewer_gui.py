@@ -585,8 +585,8 @@ class MapViewerRosNode(Node):
 
 class MapViewerWindow(QWidget):
     _ROBOT_DISPLAY_Z_OFFSET = -0.3
-    # 与 octo_planner path_z_offset_m 一致，GUI 起终点/路径与雷达高度点云对齐
-    _PATH_DISPLAY_Z_OFFSET = 0.45
+    # 与 octo_planner path_z_offset_m 一致（0=地图真实 z）
+    _PATH_DISPLAY_Z_OFFSET = 0.0
     _LAYER_STYLE = {
         "occupied": ((0.95, 0.45, 0.15), 1.0, "占据"),
         "preblocked": ((0.15, 0.35, 1.0), 1.0, "禁行"),

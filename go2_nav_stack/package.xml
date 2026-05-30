@@ -38,6 +38,9 @@
   <exec_depend>traj_utils</exec_depend>
   <exec_depend>quadrotor_msgs</exec_depend>
   <exec_depend>ego_planner</exec_depend>
+  <exec_depend>far_planner</exec_depend>
+  <exec_depend>graph_decoder</exec_depend>
+  <exec_depend>visibility_graph_msg</exec_depend>
 
   <export>
     <build_type>ament_python</build_type>

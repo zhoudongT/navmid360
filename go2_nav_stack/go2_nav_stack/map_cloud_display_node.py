@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+import math
+
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
@@ -43,7 +45,21 @@ class MapCloudDisplayNode(Node):
         self.declare_parameter("use_latest_tf", True)
         self.declare_parameter("max_points", 12000)
         self.declare_parameter("min_publish_interval_sec", 0.08)
+        self.declare_parameter("base_frame", "base_link")
+        self.declare_parameter("enable_base_z_crop", True)
+        # 地面在 base 下方 0.3m；障碍检测带 [ground-margin, max]
+        self.declare_parameter("ground_below_base_m", 0.30)
+        self.declare_parameter("obstacle_z_margin_below_ground_m", 0.08)
+        self.declare_parameter("obstacle_z_max_in_base_m", 0.8)
+        self.declare_parameter("robot_body_radius_m", 0.35)
 
+        self._base_frame = str(self.get_parameter("base_frame").value)
+        self._crop_base_z = bool(self.get_parameter("enable_base_z_crop").value)
+        ground = float(self.get_parameter("ground_below_base_m").value)
+        margin = float(self.get_parameter("obstacle_z_margin_below_ground_m").value)
+        self._z_min_base = -ground - margin
+        self._z_max_base = float(self.get_parameter("obstacle_z_max_in_base_m").value)
+        self._robot_body_r = float(self.get_parameter("robot_body_radius_m").value)
         self._in_topic = str(self.get_parameter("input_topic").value)
         self._out_topic = str(self.get_parameter("output_topic").value)
         self._target_frame = str(self.get_parameter("target_frame").value)
@@ -67,8 +83,10 @@ class MapCloudDisplayNode(Node):
         self.create_subscription(Bool, "/relocalization/ok", self._on_reloc_ok, 10)
         self.create_subscription(String, "/relocalization/status", self._on_reloc_status, 10)
         self.get_logger().info(
-            f"/cloud_registered_map: 彩色 {self._in_topic} -> {self._out_topic} "
-            f"(TF -> {self._target_frame}, 保留 intensity)"
+            f"/cloud_registered_map: {self._in_topic} -> {self._out_topic} "
+            f"(TF->{self._target_frame}, base z=[{self._z_min_base:.2f},{self._z_max_base:.2f}]m)"
+            if self._crop_base_z
+            else f"/cloud_registered_map: {self._in_topic} -> {self._out_topic} (TF->{self._target_frame})"
         )
 
     def _set_reloc_ok(self, ok: bool) -> None:
@@ -125,6 +143,101 @@ class MapCloudDisplayNode(Node):
             except TransformException as ex:
                 last_ex = ex
         raise last_ex  # type: ignore[misc]
+
+    def _lookup_map_to_base(self, stamp: Time):
+        timeout = rclpy.duration.Duration(seconds=self._tf_timeout)
+        times = [Time()] if self._use_latest_tf else []
+        if stamp.nanoseconds > 0:
+            times.insert(0, stamp)
+        elif not times:
+            times = [Time()]
+        last_ex = None
+        for t in times:
+            try:
+                return self._tf_buffer.lookup_transform(
+                    self._target_frame,
+                    self._base_frame,
+                    t,
+                    timeout=timeout,
+                )
+            except TransformException as ex:
+                last_ex = ex
+        raise last_ex  # type: ignore[misc]
+
+    @staticmethod
+    def _point_map_to_base(
+        x: float, y: float, z: float, t, q
+    ) -> tuple[float, float, float]:
+        tx, ty, tz = float(t.x), float(t.y), float(t.z)
+        dx, dy, dz = x - tx, y - ty, z - tz
+        qx, qy, qz, qw = float(q.x), float(q.y), float(q.z), float(q.w)
+        xx, yy, zz = qx * qx, qy * qy, qz * qz
+        xy, xz, yz = qx * qy, qx * qz, qy * qz
+        wx, wy, wz = qw * qx, qw * qy, qw * qz
+        bx = (1.0 - 2.0 * (yy + zz)) * dx + 2.0 * (xy + wz) * dy + 2.0 * (xz - wy) * dz
+        by = 2.0 * (xy - wz) * dx + (1.0 - 2.0 * (xx + zz)) * dy + 2.0 * (yz + wx) * dz
+        bz = 2.0 * (xz + wy) * dx + 2.0 * (yz - wx) * dy + (1.0 - 2.0 * (xx + yy)) * dz
+        return bx, by, bz
+
+    def _filter_by_base_z(self, msg: PointCloud2, stamp: Time) -> PointCloud2 | None:
+        if not self._crop_base_z:
+            return msg
+        try:
+            tf_mb = self._lookup_map_to_base(stamp)
+        except TransformException as ex:
+            self.get_logger().warn(
+                f"map->{self._base_frame} TF 失败，跳过 z 裁剪: {ex}",
+                throttle_duration_sec=5.0,
+            )
+            return None
+        t = tf_mb.transform.translation
+        q = tf_mb.transform.rotation
+        intensity_name = self._intensity_field(msg)
+        kept: list[tuple] = []
+        if intensity_name:
+            for row in point_cloud2.read_points(
+                msg, field_names=("x", "y", "z", intensity_name), skip_nans=True
+            ):
+                bx, by, bz = self._point_map_to_base(
+                    float(row[0]), float(row[1]), float(row[2]), t, q
+                )
+                if math.hypot(bx, by) < self._robot_body_r:
+                    continue
+                if self._z_min_base <= bz <= self._z_max_base:
+                    kept.append((float(row[0]), float(row[1]), float(row[2]), float(row[3])))
+            if not kept:
+                return msg
+            hdr = Header()
+            hdr.stamp = msg.header.stamp
+            hdr.frame_id = msg.header.frame_id
+            fields = [
+                PointField(name="x", offset=0, datatype=PointField.FLOAT32, count=1),
+                PointField(name="y", offset=4, datatype=PointField.FLOAT32, count=1),
+                PointField(name="z", offset=8, datatype=PointField.FLOAT32, count=1),
+                PointField(
+                    name="intensity", offset=12, datatype=PointField.FLOAT32, count=1
+                ),
+            ]
+            return point_cloud2.create_cloud(hdr, fields, kept)
+        for x, y, z in point_cloud2.read_points(
+            msg, field_names=("x", "y", "z"), skip_nans=True
+        ):
+            bx, by, bz = self._point_map_to_base(float(x), float(y), float(z), t, q)
+            if math.hypot(bx, by) < self._robot_body_r:
+                continue
+            if self._z_min_base <= bz <= self._z_max_base:
+                kept.append((float(x), float(y), float(z)))
+        if not kept:
+            return msg
+        hdr = Header()
+        hdr.stamp = msg.header.stamp
+        hdr.frame_id = msg.header.frame_id
+        fields = [
+            PointField(name="x", offset=0, datatype=PointField.FLOAT32, count=1),
+            PointField(name="y", offset=4, datatype=PointField.FLOAT32, count=1),
+            PointField(name="z", offset=8, datatype=PointField.FLOAT32, count=1),
+        ]
+        return point_cloud2.create_cloud(hdr, fields, kept)
 
     def _transform_to_map(self, msg: PointCloud2, trans) -> PointCloud2:
         t = trans.transform.translation
@@ -220,7 +333,10 @@ class MapCloudDisplayNode(Node):
             stamp = Time.from_msg(msg.header.stamp)
             trans = self._lookup_map_transform(msg.header.frame_id, stamp)
             out = self._transform_to_map(msg, trans)
-            self._pub.publish(self._downsample_cloud(out))
+            filtered = self._filter_by_base_z(out, stamp)
+            if filtered is None:
+                return
+            self._pub.publish(self._downsample_cloud(filtered))
         except TransformException as ex:
             self.get_logger().warn(
                 f"TF {msg.header.frame_id}->{self._target_frame}: {ex}",

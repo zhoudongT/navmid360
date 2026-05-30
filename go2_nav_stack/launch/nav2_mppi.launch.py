@@ -1,4 +1,4 @@
-"""【可选/遗留】Nav2 local_costmap + MPPI。默认 bringup 已不启动，仅调试时单独 launch。"""
+"""【可选】单独启动 Nav2 costmap + MPPI（与 corridor_mppi 相同 /costmap/costmap）。"""
 
 from __future__ import annotations
 
@@ -26,6 +26,7 @@ def generate_launch_description():
                 package="nav2_costmap_2d",
                 executable="nav2_costmap_2d",
                 name="costmap",
+                namespace="costmap",
                 output="screen",
                 parameters=[costmap_params, {"use_sim_time": use_sim_time}],
                 remappings=[

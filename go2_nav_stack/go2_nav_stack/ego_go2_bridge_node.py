@@ -38,25 +38,24 @@ class EgoGo2BridgeNode(Node):
         self.declare_parameter("crop_tf_fallback_latest", True)
         self.declare_parameter("publish_grid_odom", True)
         self.declare_parameter("cloud_stale_warn_sec", 0.35)
-        # 相对 base_link：激光下 30cm 至向上高度带内的点作为 EGO 障碍（可通行区外）
+        # 相对 base_link 障碍高度带（默认较原 0.17~1.0m 下移 0.35m）
         self.declare_parameter("cloud_crop_in_base_frame", True)
-        self.declare_parameter("lidar_height_m", 0.27)
-        self.declare_parameter("obstacle_below_lidar_m", 0.30)
-        self.declare_parameter("obstacle_max_height_above_base_m", 1.0)
+        self.declare_parameter("obstacle_min_height_above_base_m", -0.18)
+        self.declare_parameter("obstacle_max_height_above_base_m", 0.65)
         self.declare_parameter("enable_cloud_z_crop", True)
         # map 系绝对高度裁剪（仅 cloud_crop_in_base_frame=false 时使用）
-        self.declare_parameter("cloud_z_min_m", 0.05)
-        self.declare_parameter("cloud_z_max_m", 0.48)
+        self.declare_parameter("cloud_z_min_m", -0.18)
+        self.declare_parameter("cloud_z_max_m", 0.65)
         self.declare_parameter("robot_body_radius_m", 0.35)
 
         did = int(self.get_parameter("drone_id").value)
         self._crop_base = bool(self.get_parameter("cloud_crop_in_base_frame").value)
-        self._lidar_h = float(self.get_parameter("lidar_height_m").value)
-        self._below_lidar = float(self.get_parameter("obstacle_below_lidar_m").value)
+        self._z_min_base = float(
+            self.get_parameter("obstacle_min_height_above_base_m").value
+        )
         self._max_h_base = float(
             self.get_parameter("obstacle_max_height_above_base_m").value
         )
-        self._z_min_base = self._lidar_h - self._below_lidar
         self._cloud_z_min = float(self.get_parameter("cloud_z_min_m").value)
         self._cloud_z_max = float(self.get_parameter("cloud_z_max_m").value)
         self._crop_cloud = bool(self.get_parameter("enable_cloud_z_crop").value)
@@ -118,7 +117,7 @@ class EgoGo2BridgeNode(Node):
 
         crop_desc = (
             f"base z∈[{self._z_min_base:.2f},{self._max_h_base:.2f}]m "
-            f"(激光{self._lidar_h}m下{self._below_lidar}m起向上)"
+            f"(低于 {self._z_min_base:.2f}m 视为可跨越/地面)"
             if self._crop_base
             else f"map z∈[{self._cloud_z_min},{self._cloud_z_max}]"
         )

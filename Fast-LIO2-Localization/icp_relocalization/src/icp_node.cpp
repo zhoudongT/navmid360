@@ -67,6 +67,14 @@ public:
         this->declare_parameter("ndt_resolution", 1.0);
         this->declare_parameter("ndt_step_size", 0.1);
         this->declare_parameter("ndt_max_iter", 35);
+        this->declare_parameter("use_submap_icp", true);
+        this->declare_parameter("submap_radius_xy_m", 25.0);
+        this->declare_parameter("submap_min_points", 800);
+        // /initialpose：Qt/Scan Context 的 z 通常为地面高度；ICP 初值需 livox_frame 在 map 中的位姿
+        this->declare_parameter("initialpose_z_is_ground", true);
+        this->declare_parameter("ground_to_lidar_z_m", 0.50);
+        this->declare_parameter("initialpose_is_base_link", false);
+        this->declare_parameter("base_to_lidar_z_m", 0.45);
 
         this->get_parameter("initial_x", initial_x);
         this->get_parameter("initial_y", initial_y);
@@ -107,6 +115,13 @@ public:
         this->get_parameter("ndt_resolution", ndt_resolution_);
         this->get_parameter("ndt_step_size", ndt_step_size_);
         this->get_parameter("ndt_max_iter", ndt_max_iter_);
+        this->get_parameter("use_submap_icp", use_submap_icp_);
+        this->get_parameter("submap_radius_xy_m", submap_radius_xy_m_);
+        this->get_parameter("submap_min_points", submap_min_points_);
+        this->get_parameter("initialpose_z_is_ground", initialpose_z_is_ground_);
+        this->get_parameter("ground_to_lidar_z_m", ground_to_lidar_z_m_);
+        this->get_parameter("initialpose_is_base_link", initialpose_is_base_link_);
+        this->get_parameter("base_to_lidar_z_m", base_to_lidar_z_m_);
 
         if (publish_map_to_odom_tf_) {
             tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
@@ -142,13 +157,14 @@ public:
         pose_sub_ = this->create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
             "initialpose", 10, std::bind(&ICPNode::pose_callback, this, std::placeholders::_1));
         map_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("prior_map", 10);
+        local_map_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("local_prior_map", 10);
         transformed_cloud_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("transformed_cloud", 10);
         
         // init guess
         initGuess = Eigen::Matrix4f::Identity();
         initGuess(0, 3) = initial_x;
         initGuess(1, 3) = initial_y;
-        initGuess(2, 3) = initial_z;
+        initGuess(2, 3) = initialpose_to_lidar_z(static_cast<float>(initial_z));
         // You need to convert the quaternion to a rotation matrix and set it to the upper-left 3x3 part of the matrix
         tf2::Quaternion q;
         q.setRPY(0, 0, initial_a);
@@ -160,7 +176,11 @@ public:
                 initGuess(i, j) = rot_mat[i][j];
             }
         }
-        RCLCPP_INFO(this->get_logger(), "Initial guess: \n x: %f, y: %f, z: %f, a: %f", initial_x, initial_y, initial_z, initial_a);
+        RCLCPP_INFO(
+            this->get_logger(),
+            "Initial guess (lidar in map): x=%f y=%f z=%f yaw=%f (input z=%f, z_offset=%.2f)",
+            initGuess(0, 3), initGuess(1, 3), initGuess(2, 3), initial_a, initial_z,
+            initialpose_z_offset());
         // Load the target point cloud from a PCD file
         if (pcl::io::loadPCDFile<pcl::PointXYZ>(map_path, *target_cloud_) == -1)
         {
@@ -173,7 +193,15 @@ public:
         sor_map.setInputCloud(target_cloud_);
         sor_map.setLeafSize(map_voxel_leaf_size, map_voxel_leaf_size, map_voxel_leaf_size);
         sor_map.filter(*target_cloud_);
+        target_cloud_full_ = pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud<pcl::PointXYZ>(*target_cloud_));
         RCLCPP_INFO(this->get_logger(), "Downsampled target cloud to %d data points", target_cloud_->width * target_cloud_->height);
+        if (use_submap_icp_) {
+            RCLCPP_INFO(
+                this->get_logger(),
+                "Submap ICP enabled: radius=%.1fm min_points=%d",
+                submap_radius_xy_m_, submap_min_points_);
+            update_submap_target(initGuess);
+        }
         // Publish the downsampled target cloud
 
         pcl::toROSMsg(*target_cloud_, target_cloud_msg);
@@ -186,6 +214,22 @@ public:
     }
 
 private:
+    float initialpose_z_offset() const
+    {
+        if (initialpose_z_is_ground_) {
+            return static_cast<float>(ground_to_lidar_z_m_);
+        }
+        if (initialpose_is_base_link_) {
+            return static_cast<float>(base_to_lidar_z_m_);
+        }
+        return 0.f;
+    }
+
+    float initialpose_to_lidar_z(float z_in) const
+    {
+        return z_in + initialpose_z_offset();
+    }
+
     /** 地面车 + 水平先验图：只保留 x/y/z/yaw，去掉 ICP 对朝天雷达误估的 roll/pitch */
     Eigen::Matrix4f constrain_planar(const Eigen::Matrix4f & t) const
     {
@@ -292,6 +336,40 @@ private:
         *cloud = filtered;
         cloud->width = cloud->size();
         cloud->height = 1;
+    }
+
+    void update_submap_target(const Eigen::Matrix4f & guess)
+    {
+        if (!use_submap_icp_ || !target_cloud_full_ || target_cloud_full_->empty()) {
+            return;
+        }
+        const float cx = guess(0, 3);
+        const float cy = guess(1, 3);
+        const float r2 = static_cast<float>(submap_radius_xy_m_ * submap_radius_xy_m_);
+        pcl::PointCloud<pcl::PointXYZ> cropped;
+        cropped.reserve(target_cloud_full_->size());
+        for (const auto & pt : target_cloud_full_->points) {
+            const float dx = pt.x - cx;
+            const float dy = pt.y - cy;
+            if (dx * dx + dy * dy <= r2) {
+                cropped.push_back(pt);
+            }
+        }
+        if (static_cast<int>(cropped.size()) < submap_min_points_) {
+            RCLCPP_WARN_THROTTLE(
+                this->get_logger(), *this->get_clock(), 5000,
+                "Submap crop only %zu pts (< %d), fallback to full map",
+                cropped.size(), submap_min_points_);
+            *target_cloud_ = *target_cloud_full_;
+        } else {
+            *target_cloud_ = cropped;
+            target_cloud_->width = target_cloud_->size();
+            target_cloud_->height = 1;
+        }
+        pcl::toROSMsg(*target_cloud_, target_cloud_msg);
+        target_cloud_msg.header.stamp = this->now();
+        target_cloud_msg.header.frame_id = map_frame;
+        local_map_pub_->publish(target_cloud_msg);
     }
 
     struct IcpAlignResult
@@ -411,6 +489,9 @@ private:
         }
 
         scan_frame_count_++;
+        if (use_submap_icp_ && manual_pose_set_) {
+            update_submap_target(initGuess);
+        }
         const bool allow_yaw_search =
             (scan_frame_count_ % 3 == 0) || !have_imu_;
         const IcpAlignResult icp_result =
@@ -577,9 +658,14 @@ private:
     {
         // Convert the incoming pose to an Eigen matrix
         initGuess = Eigen::Matrix4f::Identity();
+        const float z_in = static_cast<float>(msg->pose.pose.position.z);
         initGuess(0, 3) = msg->pose.pose.position.x;
         initGuess(1, 3) = msg->pose.pose.position.y;
-        initGuess(2, 3) = msg->pose.pose.position.z;
+        initGuess(2, 3) = initialpose_to_lidar_z(z_in);
+        RCLCPP_INFO(
+            this->get_logger(),
+            "/initialpose -> lidar z: %.3f (input z=%.3f, offset=%.2f)",
+            initGuess(2, 3), z_in, initialpose_z_offset());
         // You need to convert the quaternion to a rotation matrix and set it to the upper-left 3x3 part of the matrix
         tf2::Quaternion q;
         tf2::fromMsg(msg->pose.pose.orientation, q);
@@ -598,6 +684,9 @@ private:
         converged_count = 0;
         pose_published_ = false;
         manual_pose_set_ = true;
+        if (use_submap_icp_ && target_cloud_full_ && !target_cloud_full_->empty()) {
+            update_submap_target(initGuess);
+        }
         // map->odom 由 go2 tf_manager 根据 /icp_result 发布，此处只更新 initGuess
     }
 
@@ -610,6 +699,8 @@ private:
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr map_pub_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr transformed_cloud_pub_;
     pcl::PointCloud<pcl::PointXYZ>::Ptr target_cloud_{new pcl::PointCloud<pcl::PointXYZ>};
+    pcl::PointCloud<pcl::PointXYZ>::Ptr target_cloud_full_;
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr local_map_pub_;
 
     Eigen::Matrix4f initGuess;
     double initial_x, initial_y, initial_z, initial_a;
@@ -653,6 +744,13 @@ private:
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_;
     std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
     int scan_frame_count_ = 0;
+    bool use_submap_icp_ = true;
+    double submap_radius_xy_m_ = 25.0;
+    int submap_min_points_ = 800;
+    bool initialpose_z_is_ground_ = true;
+    double ground_to_lidar_z_m_ = 0.50;
+    bool initialpose_is_base_link_ = false;
+    double base_to_lidar_z_m_ = 0.45;
 };
 
 int main(int argc, char *argv[])

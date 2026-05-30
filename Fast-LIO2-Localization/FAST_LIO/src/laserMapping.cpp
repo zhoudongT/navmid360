@@ -1169,15 +1169,16 @@ private:
         if (send_odom_base_tf)
         {
             trans.child_frame_id = base_frame;
+            trans.transform.translation.x = odomAftMapped.pose.pose.position.x;
+            trans.transform.translation.y = odomAftMapped.pose.pose.position.y;
+            trans.transform.translation.z = odomAftMapped.pose.pose.position.z;
+            trans.transform.rotation.w = odomAftMapped.pose.pose.orientation.w;
+            trans.transform.rotation.x = odomAftMapped.pose.pose.orientation.x;
+            trans.transform.rotation.y = odomAftMapped.pose.pose.orientation.y;
+            trans.transform.rotation.z = odomAftMapped.pose.pose.orientation.z;
+            tf_broadcaster_->sendTransform(trans);
         }
-        trans.transform.translation.x = odomAftMapped.pose.pose.position.x;
-        trans.transform.translation.y = odomAftMapped.pose.pose.position.y;
-        trans.transform.translation.z = odomAftMapped.pose.pose.position.z;
-        trans.transform.rotation.w = odomAftMapped.pose.pose.orientation.w;
-        trans.transform.rotation.x = odomAftMapped.pose.pose.orientation.x;
-        trans.transform.rotation.y = odomAftMapped.pose.pose.orientation.y;
-        trans.transform.rotation.z = odomAftMapped.pose.pose.orientation.z;
-        tf_broadcaster_->sendTransform(trans);
+        // send_odom_base_tf=false：不发 odom TF，由 go2 tf_manager 独占 odom->base_link
     }
 
     void publish_path(rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pubPath)

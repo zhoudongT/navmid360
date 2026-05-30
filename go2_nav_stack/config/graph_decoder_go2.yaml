@@ -1,0 +1,4 @@
+graph_decoder:
+  ros__parameters:
+    world_frame: map
+    visual_scale_ratio: 0.5

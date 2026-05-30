@@ -1,7 +1,8 @@
 nav2_controller_bringup:
   ros__parameters:
-    # launch name=costmap + 可执行文件内层节点 costmap → lifecycle /costmap/costmap
     costmap_node: costmap/costmap
+    costmap_node_alt: costmap
+    skip_standalone_costmap_after_retries: 5
     controller_node: controller_server
     startup_delay_sec: 5.0
     node_wait_timeout_sec: 90.0

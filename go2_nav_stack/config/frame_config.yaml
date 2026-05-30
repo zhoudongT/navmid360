@@ -6,12 +6,14 @@
     base_frame: base_link
     imu_frame: imu_link
     lidar_frame: livox_frame
+    footprint_frame: base_footprint
 
     # TF 发布职责（勿改除非全栈一起改）
     map_to_odom_publisher: tf_manager_node
     odom_to_base_publisher: tf_manager_node
     base_to_lidar_publisher: tf_manager_node
-    lidar_to_imu_publisher: fastlio2_localization.launch
+    # 三帧同点，勿再发 livox->imu 静态 TF
+    lidar_to_imu_publisher: none
 
     # 关键话题（位姿以 TF map→base_link 为准；里程计主话题为 LIO 原始输出）
     topic_lio_odom_raw: /lio_odom_raw
@@ -30,5 +32,5 @@
     cloud_registered_frame: odom
     prior_map_frame: map
     planned_path_frame: map
-    # 独立 RViz 局部 costmap：global_frame=base_link，随机体 TF 移动
+    # 独立 RViz costmap：base_link 随狗移动/旋转；MPPI 内嵌仍用 odom
     local_costmap_global_frame: base_link

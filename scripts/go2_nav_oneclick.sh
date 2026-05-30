@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Go2 实车一键启动：Livox + FAST-LIO2 + ICP + TF + 网页规划 + Qt 地图管理 + EGO 导航
+# Go2 实车一键启动：Livox + FAST-LIO2 + ICP + TF + 网页规划 + Qt 地图管理 + 局部规划（EGO/FAR）
 #
 # 默认地图: /home/allen/maps/window_filtered_all + 先验 /home/allen/maps/scans_0.5m.pcd
 #
@@ -8,7 +8,12 @@
 # 已知粗位姿：RELOC_AUTO_START=false INITIAL_X=... INITIAL_Y=... INITIAL_YAW=...
 #
 # 用法:
-#   ./scripts/go2_nav_oneclick.sh
+#   ./scripts/go2_nav_oneclick.sh              # 默认 EGO
+#   ./scripts/go2_nav_oneclick.sh --far        # CMU FAR Planner
+#   ./scripts/go2_nav_oneclick_far.sh          # 同上（FAR 专用脚本）
+#   ./scripts/go2_nav_oneclick.sh --mppi       # 走廊 + MPPI 局部避障
+#   ./scripts/go2_nav_oneclick_mppi.sh         # 同上（MPPI 专用脚本）
+#   LOCAL_PLANNER=mppi ./scripts/go2_nav_oneclick.sh
 #   ./scripts/go2_nav_oneclick.sh --no-gui --no-rviz
 #   RELOC_AUTO_START=false ./scripts/go2_nav_oneclick.sh
 #   RELOC_AUTO_START=false INITIAL_X=5 INITIAL_Y=2 INITIAL_YAW=1.57 ./scripts/go2_nav_oneclick.sh
@@ -40,17 +45,22 @@ if [[ "$RELOC_AUTO_START" != true && -n "$INITIAL_X" && -n "$INITIAL_Y" ]]; then
 fi
 FAST_START="${FAST_START:-1}"
 ROSBRIDGE_DELAY_SEC="${ROSBRIDGE_DELAY_SEC:-2.0}"
+LOCAL_PLANNER="${LOCAL_PLANNER:-ego}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --far) LOCAL_PLANNER=far; shift ;;
+    --mppi) LOCAL_PLANNER=mppi; shift ;;
+    --ego) LOCAL_PLANNER=ego; shift ;;
     --no-gui) LAUNCH_MAP_GUI=false; shift ;;
     --no-rviz) LAUNCH_RVIZ=false; shift ;;
     --no-web-bridge) LAUNCH_ROSBRIDGE=false; shift ;;
     --no-web) LAUNCH_WEB=false; shift ;;
     -h|--help)
-      echo "用法: $0 [--no-gui] [--no-rviz] [--no-web] [--no-web-bridge]"
-      echo "环境变量: RELOC_AUTO_START RELOC_STARTUP_DELAY_SEC ICP_CONVERGED_COUNT"
-      echo "          INITIAL_X INITIAL_Y INITIAL_YAW MAPS_ROOT MAP_PACKAGE PRIOR_PCD ..."
+      echo "用法: $0 [--ego|--far|--mppi] [--no-gui] [--no-rviz] [--no-web] [--no-web-bridge]"
+      echo "环境变量: LOCAL_PLANNER=ego|far|mppi  RELOC_AUTO_START  RELOC_STARTUP_DELAY_SEC"
+      echo "          ICP_CONVERGED_COUNT  INITIAL_X INITIAL_Y INITIAL_YAW"
+      echo "          MAPS_ROOT MAP_PACKAGE PRIOR_PCD ..."
       exit 0
       ;;
     *) echo "未知参数: $1"; exit 1 ;;
@@ -86,6 +96,24 @@ if [[ ! -f "$ROOT/install/setup.bash" ]]; then
 fi
 # shellcheck source=/dev/null
 source "$ROOT/install/setup.bash"
+
+if [[ "$LOCAL_PLANNER" == "mppi" ]]; then
+  if ! ros2 pkg prefix nav2_mppi_controller &>/dev/null; then
+    echo "错误: 未安装 nav2_mppi_controller。请执行:"
+    echo "  sudo apt install -y ros-humble-nav2-mppi-controller ros-humble-nav2-controller ros-humble-nav2-costmap-2d"
+    exit 1
+  fi
+fi
+
+if [[ "$LOCAL_PLANNER" == "far" ]]; then
+  if [[ ! -f "$ROOT/install/far_planner/share/far_planner/package.xml" ]]; then
+    echo "错误: far_planner 未编译。请先执行:"
+    echo "  bash $ROOT/scripts/sync_far_planner.sh"
+    echo "  bash $ROOT/scripts/build_far_planner_humble.sh"
+    echo "  source $ROOT/install/setup.bash"
+    exit 1
+  fi
+fi
 
 if [[ ! -d "$MAP_PACKAGE" ]]; then
   echo "错误: OctoMap 地图包不存在: $MAP_PACKAGE"
@@ -136,11 +164,36 @@ echo " Qt Manager: $LAUNCH_MAP_GUI"
 echo " RViz:       $LAUNCH_RVIZ"
 echo " 重定位:     $([ "$RELOC_AUTO_START" = true ] && echo "自动 SC+ICP (${RELOC_STARTUP_DELAY_SEC}s)" || ([ "$SEED_INITIALPOSE" = true ] && echo "种子 ICP (${INITIAL_X},${INITIAL_Y})" || echo '手动 Qt「当前姿态」'))"
 echo " 里程计:     FAST-LIO2 + ICP 先验图"
-echo " 局部规划:   EGO Planner；全局 /planned_path -> /move_base_simple/goal"
+if [[ "$LOCAL_PLANNER" == "far" ]]; then
+  echo " 局部规划:   CMU FAR Planner（/way_point -> /cmd_vel）"
+  echo " RViz 配置:  rviz_go2_nav_far.rviz（FAR 路径/障碍，已隐藏 EGO）"
+elif [[ "$LOCAL_PLANNER" == "mppi" ]]; then
+  echo " 局部规划:   走廊 + Nav2 MPPI（/global_path_processed -> /cmd_vel）"
+  echo " RViz 配置:  rviz_go2_nav_mppi.rviz（路径/障碍/costmap/MPPI 轨迹）"
+else
+  echo " 局部规划:   EGO Planner；全局 /planned_path -> /ego_global_path"
+  echo " RViz 配置:  rviz_go2_nav.rviz"
+fi
 echo " 快速启动:   FAST_START=${FAST_START}  rosbridge_delay=${ROSBRIDGE_DELAY_SEC}s"
 echo "=========================================="
 
+RVIZ_CFG="${RVIZ_CONFIG:-}"
+if [[ "$LOCAL_PLANNER" == "far" && -z "$RVIZ_CFG" ]]; then
+  if command -v ros2 &>/dev/null; then
+    RVIZ_CFG="$(ros2 pkg prefix go2_nav_stack 2>/dev/null)/share/go2_nav_stack/config/rviz_go2_nav_far.rviz"
+  fi
+  RVIZ_CFG="${RVIZ_CFG:-$ROOT/go2_nav_stack/config/rviz_go2_nav_far.rviz}"
+fi
+if [[ "$LOCAL_PLANNER" == "mppi" && -z "$RVIZ_CFG" ]]; then
+  if command -v ros2 &>/dev/null; then
+    RVIZ_CFG="$(ros2 pkg prefix go2_nav_stack 2>/dev/null)/share/go2_nav_stack/config/rviz_go2_nav_mppi.rviz"
+  fi
+  RVIZ_CFG="${RVIZ_CFG:-$ROOT/go2_nav_stack/config/rviz_go2_nav_mppi.rviz}"
+fi
+
 exec ros2 launch go2_nav_stack go2_full_stack.launch.py \
+  local_planner:="$LOCAL_PLANNER" \
+  ${RVIZ_CFG:+rviz_config:="$RVIZ_CFG"} \
   maps_root:="$MAPS_ROOT" \
   map_package_dir:="$MAP_PACKAGE" \
   prior_pcd_path:="$PRIOR_PCD" \

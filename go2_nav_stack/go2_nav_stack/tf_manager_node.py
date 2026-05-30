@@ -16,7 +16,7 @@ import rclpy
 from geometry_msgs.msg import Pose, PoseWithCovarianceStamped, TransformStamped
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
-from std_msgs.msg import Bool, String
+from std_msgs.msg import Bool, Empty, String
 from tf2_ros import StaticTransformBroadcaster, TransformBroadcaster
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
@@ -113,8 +113,12 @@ class TfManagerNode(Node):
         self.declare_parameter("tf_timeout", 0.3)
         self.declare_parameter("static_base_to_imu_xyz", [0.0, 0.0, 0.0])
         self.declare_parameter("static_base_to_imu_rpy", [0.0, 0.0, 0.0])
-        self.declare_parameter("static_base_to_lidar_xyz", [0.0, 0.0, 0.15])
+        self.declare_parameter("static_base_to_lidar_xyz", [0.0, 0.0, 0.0])
         self.declare_parameter("static_base_to_lidar_rpy", [0.0, 0.0, 0.0])
+        self.declare_parameter("publish_base_footprint", True)
+        self.declare_parameter("footprint_frame", "base_footprint")
+        self.declare_parameter("static_base_to_footprint_xyz", [0.0, 0.0, -0.5])
+        self.declare_parameter("static_base_to_footprint_rpy", [0.0, 0.0, 0.0])
         self.declare_parameter("publish_base_to_imu", False)
         self.declare_parameter("publish_odom_to_base", True)
         self.declare_parameter("publish_map_to_odom", True)
@@ -150,6 +154,7 @@ class TfManagerNode(Node):
         self._have_map_odom = False
         self._t_map_odom_mat: np.ndarray | None = None
         self._reloc_applied = False
+        self._static_tf_logged = False
         self._last_icp_refine_time = 0.0
         self._odom_to_base = TransformStamped()
         self._odom_to_base.header.frame_id = self._odom_frame
@@ -182,6 +187,8 @@ class TfManagerNode(Node):
         self._was_spinning = False
         self._last_wz = 0.0
         self._last_odom_mono = 0.0
+        self._last_se_pub_mono = 0.0
+        self._last_odom_twist = None
         self._spin_settle_until = 0.0
         self._spin_block_wz = float(self.get_parameter("spin_block_reloc_wz").value)
         self._spin_settle_sec = float(self.get_parameter("spin_reloc_settle_sec").value)
@@ -201,6 +208,7 @@ class TfManagerNode(Node):
         if self._republish_se:
             self._se_pub = self.create_publisher(Odometry, self._se_topic, 20)
         self._reloc_ok_pub = self.create_publisher(Bool, "/relocalization/ok", 10)
+        self._far_reset_pub = self.create_publisher(Empty, "/reset_visibility_graph", 10)
         self.create_subscription(
             PoseWithCovarianceStamped,
             "/relocalization/pose",
@@ -226,6 +234,8 @@ class TfManagerNode(Node):
             self._seed_odom_to_base_identity()
         period = 1.0 / max(1.0, float(self.get_parameter("publish_rate").value))
         self.create_timer(period, self._tick)
+        # 周期性重发 static TF，覆盖旧 launch 残留的 base->livox 外参
+        self.create_timer(5.0, self._publish_static)
         self.get_logger().info(
             f"tf_manager: odom 输入 {odom_topic} -> odom->base；"
             + (
@@ -256,9 +266,11 @@ class TfManagerNode(Node):
             imu.transform.rotation.z = q[2]
             imu.transform.rotation.w = q[3]
             statics.append(imu)
-            self.get_logger().warn(
-                "publish_base_to_imu=true：与 fastlio livox->imu 可能冲突，建议 false"
-            )
+            if not self._static_tf_logged:
+                self.get_logger().info(
+                    "static TF: %s->imu_link (identity, LIO odom child frame)"
+                    % self._base_frame
+                )
 
         lidar = TransformStamped()
         lidar.header.stamp = stamp
@@ -266,6 +278,11 @@ class TfManagerNode(Node):
         lidar.child_frame_id = self._lidar_frame
         lx, ly, lz = self.get_parameter("static_base_to_lidar_xyz").value
         lr, lp, lyaw = self.get_parameter("static_base_to_lidar_rpy").value
+        if abs(float(lx)) + abs(float(ly)) + abs(float(lz)) > 1e-6:
+            self.get_logger().warn(
+                f"static_base_to_lidar_xyz={lx, ly, lz} 非零；"
+                "base/imu/livox 应同点，请改为 [0,0,0]"
+            )
         lidar.transform.translation.x = float(lx)
         lidar.transform.translation.y = float(ly)
         lidar.transform.translation.z = float(lz)
@@ -275,11 +292,34 @@ class TfManagerNode(Node):
         lidar.transform.rotation.z = q2[2]
         lidar.transform.rotation.w = q2[3]
         statics.append(lidar)
+
+        if bool(self.get_parameter("publish_base_footprint").value):
+            fp = TransformStamped()
+            fp.header.stamp = stamp
+            fp.header.frame_id = self._base_frame
+            fp.child_frame_id = str(self.get_parameter("footprint_frame").value)
+            fx, fy, fz = self.get_parameter("static_base_to_footprint_xyz").value
+            fr, fpitch, fyaw = self.get_parameter("static_base_to_footprint_rpy").value
+            fp.transform.translation.x = float(fx)
+            fp.transform.translation.y = float(fy)
+            fp.transform.translation.z = float(fz)
+            q3 = _rpy_to_quat(float(fr), float(fpitch), float(fyaw))
+            fp.transform.rotation.x = q3[0]
+            fp.transform.rotation.y = q3[1]
+            fp.transform.rotation.z = q3[2]
+            fp.transform.rotation.w = q3[3]
+            statics.append(fp)
+
         self._static_pub.sendTransform(statics)
-        self.get_logger().info(
-            f"static TF: {self._base_frame}->{self._lidar_frame} "
-            f"(imu via livox->imu from fastlio2 launch)"
-        )
+        if not self._static_tf_logged:
+            self._static_tf_logged = True
+            fp_note = ""
+            if bool(self.get_parameter("publish_base_footprint").value):
+                fp_note = f", {self._base_frame}->{self.get_parameter('footprint_frame').value} (足端)"
+            self.get_logger().info(
+                f"static TF: {self._base_frame}->imu_link/{self._lidar_frame} (同点)"
+                f"{fp_note}"
+            )
 
     def _apply_map_to_odom_mat(self, t_map_odom: np.ndarray, log_prefix: str) -> None:
         first_lock = not self._reloc_applied
@@ -306,6 +346,8 @@ class TfManagerNode(Node):
         )
         if first_lock:
             self._reloc_ok_pub.publish(Bool(data=True))
+            self._far_reset_pub.publish(Empty())
+            self.get_logger().info("重定位完成：已发布 /reset_visibility_graph（FAR V-Graph 重置）")
 
     def _on_icp_result_direct(self, msg: PoseWithCovarianceStamped) -> None:
         if self._reloc_applied:
@@ -351,7 +393,24 @@ class TfManagerNode(Node):
         if stamp is not None and stamp.nanoseconds > 0:
             times.append(stamp)
         times.append(rclpy.time.Time())
-        for child in ("livox_frame", "imu_link", self._lidar_frame):
+        # 优先 odom->base->lidar（含 lock_odom_z），勿用 FAST-LIO 残留的 odom->imu 直链
+        for t in times:
+            try:
+                t_ob = self._buffer.lookup_transform(
+                    self._odom_frame, self._base_frame, t, timeout=dur
+                )
+                t_bl = self._buffer.lookup_transform(
+                    self._base_frame, self._lidar_frame, t, timeout=dur
+                )
+                mat = _stamp_to_mat4(t_ob) @ _stamp_to_mat4(t_bl)
+                self.get_logger().info(
+                    "reloc compose: odom->base->%s chain xy=(%.2f,%.2f)"
+                    % (self._lidar_frame, mat[0, 3], mat[1, 3])
+                )
+                return mat
+            except Exception:
+                pass
+        for child in (self._lidar_frame, "livox_frame"):
             for t in times:
                 try:
                     tf = self._buffer.lookup_transform(
@@ -360,29 +419,15 @@ class TfManagerNode(Node):
                         t,
                         timeout=dur,
                     )
-                    break
+                    mat = _stamp_to_mat4(tf)
+                    self.get_logger().info(
+                        f"reloc compose: using TF {self._odom_frame}->{child} "
+                        f"xy=({mat[0,3]:.2f},{mat[1,3]:.2f})"
+                    )
+                    return mat
                 except Exception:
-                    tf = None
-            if tf is None:
-                continue
-            mat = _stamp_to_mat4(tf)
-            self.get_logger().info(
-                f"reloc compose: using TF {self._odom_frame}->{child} "
-                f"xy=({mat[0,3]:.2f},{mat[1,3]:.2f})"
-            )
-            return mat
-        try:
-            t_ob = self._buffer.lookup_transform(
-                self._odom_frame, self._base_frame, times[0], timeout=dur
-            )
-            t_bl = self._buffer.lookup_transform(
-                self._base_frame, "livox_frame", times[0], timeout=dur
-            )
-            mat = _stamp_to_mat4(t_ob) @ _stamp_to_mat4(t_bl)
-            self.get_logger().info("reloc compose: using odom->base->livox chain")
-            return mat
-        except Exception:
-            return None
+                    continue
+        return None
 
     def _compose_map_to_odom_from_icp(
         self, msg: PoseWithCovarianceStamped
@@ -518,6 +563,35 @@ class TfManagerNode(Node):
         out.pose.pose = _mat4_to_pose(t_map_base)
         out.twist = msg.twist
         self._se_pub.publish(out)
+        self._last_se_pub_mono = time.monotonic()
+
+    def _publish_se_from_tf(self, stamp) -> None:
+        """map->base TF 补发 /state_estimation（FAR 依赖；LIO 短暂停顿时仍可用）。"""
+        if self._se_pub is None or not self._have_map_odom or not self._reloc_applied:
+            return
+        dur = rclpy.duration.Duration(seconds=float(self.get_parameter("tf_timeout").value))
+        try:
+            tf = self._buffer.lookup_transform(
+                self._map_frame,
+                self._base_frame,
+                rclpy.time.Time(),
+                timeout=dur,
+            )
+        except Exception:
+            return
+        out = Odometry()
+        out.header.stamp = stamp
+        out.header.frame_id = self._map_frame
+        out.child_frame_id = self._base_frame
+        t = tf.transform.translation
+        out.pose.pose.position.x = float(t.x)
+        out.pose.pose.position.y = float(t.y)
+        out.pose.pose.position.z = float(t.z)
+        out.pose.pose.orientation = tf.transform.rotation
+        if self._last_odom_twist is not None:
+            out.twist = self._last_odom_twist
+        self._se_pub.publish(out)
+        self._last_se_pub_mono = time.monotonic()
 
     def _on_odom(self, msg: Odometry) -> None:
         if not self.get_parameter("publish_odom_to_base").value:
@@ -525,6 +599,7 @@ class TfManagerNode(Node):
         self._odom_from_topic = True
         self._last_wz = float(msg.twist.twist.angular.z)
         self._last_odom_mono = time.monotonic()
+        self._last_odom_twist = msg.twist
         pose = self._lio_pose_to_base(msg)
         if self._planar_yaw:
             o = pose.orientation
@@ -570,6 +645,14 @@ class TfManagerNode(Node):
         ):
             self._map_to_odom.header.stamp = now
             self._map_static_pub.sendTransform([self._map_to_odom])
+
+        if (
+            self._se_pub is not None
+            and self._have_map_odom
+            and self._reloc_applied
+            and time.monotonic() - self._last_se_pub_mono > 0.15
+        ):
+            self._publish_se_from_tf(now)
 
         timeout = float(self.get_parameter("tf_timeout").value)
         dur = rclpy.duration.Duration(seconds=timeout)

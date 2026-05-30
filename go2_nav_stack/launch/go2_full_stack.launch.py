@@ -1,4 +1,4 @@
-"""一键：定位 bringup（EGO 局部）+ 导航（网页 + 地图管理器 + 全局规划）。"""
+"""一键：定位 bringup（EGO 或 FAR 局部）+ 导航（网页 + 地图管理器 + 全局规划）。"""
 
 from __future__ import annotations
 
@@ -15,6 +15,9 @@ def generate_launch_description():
     share = get_package_share_directory("go2_nav_stack")
     bringup = os.path.join(share, "launch", "bringup_humble.launch.py")
     navigation = os.path.join(share, "launch", "navigation_humble.launch.py")
+    rviz_ego = os.path.join(share, "config", "rviz_go2_nav.rviz")
+    rviz_far = os.path.join(share, "config", "rviz_go2_nav_far.rviz")
+    rviz_mppi = os.path.join(share, "config", "rviz_go2_nav_mppi.rviz")
 
     return LaunchDescription(
         [
@@ -66,9 +69,21 @@ def generate_launch_description():
                 "seed_initialpose_delay_sec",
                 default_value="7.0",
             ),
+            DeclareLaunchArgument(
+                "local_planner",
+                default_value="ego",
+                description="局部规划: ego | far | mppi",
+            ),
+            DeclareLaunchArgument(
+                "rviz_config",
+                default_value=rviz_ego,
+                description="RViz 配置路径；FAR 一键脚本会自动传入 far 版",
+            ),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(bringup),
                 launch_arguments={
+                    "local_planner": LaunchConfiguration("local_planner"),
+                    "rviz_config": LaunchConfiguration("rviz_config"),
                     "maps_root": LaunchConfiguration("maps_root"),
                     "prior_pcd_path": LaunchConfiguration("prior_pcd_path"),
                     "launch_rviz": LaunchConfiguration("launch_rviz"),

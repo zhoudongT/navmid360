@@ -1,8 +1,14 @@
 # ICP 先验图对齐（icp_node）— 与 scans_0.5m.pcd 配套
 # Go2：Livox JSON extrinsic（MID360_go2_tilt18_config.json）已补偿安装角，不再做 IMU 动态拉平
+#
+# /initialpose：Qt/Scan Context 的 z 为地面高度；三帧同点时 +ground_to_lidar_z_m 即可。
 
 icp_node:
   ros__parameters:
+    initialpose_z_is_ground: true
+    ground_to_lidar_z_m: 0.50
+    initialpose_is_base_link: false
+    base_to_lidar_z_m: 0.50
     gravity_align_enable: false
     imu_topic: "/livox/imu_filtered"
     icp_planar_constraint: true

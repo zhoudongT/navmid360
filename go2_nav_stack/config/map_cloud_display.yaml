@@ -5,7 +5,14 @@ map_cloud_display_node:
     target_frame: map
     tf_timeout_sec: 0.25
     require_reloc_ok: true
-    # true：map->odom 非连续高频，用 stamp 查 TF 会大量丢帧（EGO 仅 ~1Hz）；RViz 彩色图可接受轻微滞后
     use_latest_tf: true
     max_points: 16000
     min_publish_interval_sec: 0.05
+    # 以足端为 z=0，与 costmap robot_base_frame 一致
+    base_frame: base_footprint
+    enable_base_z_crop: true
+    # z_min = -ground_below - margin = 0.12（障碍带上移 0.2m）
+    ground_below_base_m: -0.2
+    obstacle_z_margin_below_ground_m: 0.08
+    obstacle_z_max_in_base_m: 1.05
+    robot_body_radius_m: 0.35

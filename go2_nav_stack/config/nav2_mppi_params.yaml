@@ -1,23 +1,25 @@
-# Nav2 局部：MPPI FollowPath + 滚动 local_costmap（Mid-360 点云避障）
-# 全局路径仍由 dong_path_node 发布 /planned_path，由 mppi_path_follower 送入 FollowPath action
+# Nav2 局部：MPPI FollowPath + 滚动 costmap（Mid-360 点云避障）
+# 独立节点发布 /costmap/costmap；MPPI 用 controller 内嵌 costmap（参数须与 local_costmap_standalone.yaml 一致）
+# 全局路径由 mppi_path_follower 送入 FollowPath；遇障须 ObstaclesCritic/CostCritic 压过 PathFollow
+# 内嵌 local_costmap 用 odom（MPPI 路径 map→odom）；RViz 独立 /costmap 仍用 base_link（见 standalone yaml）
 
 controller_server:
   ros__parameters:
     use_sim_time: false
-    odom_topic: /lio_odom_raw
-    local_costmap: local_costmap/local_costmap
+    odom_topic: /nav2_odom
+    costmap_update_timeout: 2.0
     controller_frequency: 20.0
     min_x_velocity_threshold: 0.001
     min_y_velocity_threshold: 0.001
     min_theta_velocity_threshold: 0.001
-    failure_tolerance: 0.5
+    failure_tolerance: 1.2
     progress_checker_plugin: "progress_checker"
     goal_checker_plugins: ["general_goal_checker"]
     controller_plugins: ["FollowPath"]
     progress_checker:
       plugin: "nav2_controller::SimpleProgressChecker"
-      required_movement_radius: 0.25
-      movement_time_allowance: 15.0
+      required_movement_radius: 0.15
+      movement_time_allowance: 25.0
     general_goal_checker:
       stateful: true
       plugin: "nav2_controller::SimpleGoalChecker"
@@ -28,20 +30,20 @@ controller_server:
       motion_model: "DiffDrive"
       time_steps: 56
       model_dt: 0.05
-      batch_size: 512
+      batch_size: 1024
       iteration_count: 1
-      vx_std: 0.2
+      vx_std: 0.38
       vy_std: 0.05
-      wz_std: 0.45
-      vx_max: 0.45
-      vx_min: -0.25
+      wz_std: 0.38
+      vx_max: 0.50
+      vx_min: 0.0
       vy_max: 0.0
-      wz_max: 0.8
-      temperature: 0.3
-      gamma: 0.015
-      prune_distance: 0.8
-      transform_tolerance: 0.3
-      retry_attempt_limit: 4
+      wz_max: 0.35
+      temperature: 0.45
+      gamma: 0.010
+      prune_distance: 1.2
+      transform_tolerance: 1.0
+      retry_attempt_limit: 12
       visualize: true
       regenerate_noises: true
       TrajectoryVisualizer:
@@ -50,7 +52,9 @@ controller_server:
       critics:
         [
           "ConstraintCritic",
+          "ObstaclesCritic",
           "CostCritic",
+          "PathAngleCritic",
           "GoalCritic",
           "GoalAngleCritic",
           "PathAlignCritic",
@@ -61,85 +65,102 @@ controller_server:
         enabled: true
         cost_power: 1
         cost_weight: 4.0
+      ObstaclesCritic:
+        enabled: true
+        cost_power: 1
+        repulsion_weight: 14.0
+        critical_weight: 9.0
+        collision_cost: 1000000.0
+        consider_footprint: false
+        collision_margin_distance: 0.04
+        near_goal_distance: 0.6
       CostCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 3.81
-        consider_footprint: true
+        cost_weight: 8.0
+        consider_footprint: false
         collision_cost: 1000000.0
-        near_goal_distance: 1.0
+        near_goal_distance: 0.6
+        critical_cost: 245.0
+        inflation_layer_name: "inflation_layer"
       GoalCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 4.0
+        cost_weight: 3.0
         threshold_to_consider: 0.8
       GoalAngleCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 4.0
+        cost_weight: 2.0
         threshold_to_consider: 0.35
       PreferForwardCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 5.0
+        cost_weight: 6.5
         threshold_to_consider: 0.5
-      # 参考 dong_path /planned_path 各点朝向（终点=你设的 yaw，中间点=路径切线）
-      # CostCritic 仍主导避障；path 被障碍占用时可放宽对齐（max_path_occupancy_ratio）
-      # 跟随路径点姿态（由 mppi_path_follower 按前视距离写入）；不用 PathAngle（几何角会拉偏）
+      PathAngleCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 2.0
+        forward_preference: true
+        offset_from_furthest: 4
+        threshold_to_consider: 1.0
+        max_angle_to_furthest: 1.2
       PathAlignCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 8.0
-        max_path_occupancy_ratio: 0.15
+        cost_weight: 0.9
+        max_path_occupancy_ratio: 0.45
         trajectory_point_step: 3
-        threshold_to_consider: 0.5
-        offset_from_furthest: 12
-        use_path_orientations: true
+        threshold_to_consider: 1.2
+        offset_from_furthest: 14
+        use_path_orientations: false
       PathFollowCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 7.0
-        threshold_to_consider: 0.5
-        offset_from_furthest: 4
+        cost_weight: 1.5
+        threshold_to_consider: 1.5
+        offset_from_furthest: 6
 
 local_costmap:
   local_costmap:
     ros__parameters:
       use_sim_time: false
-      update_frequency: 10.0
-      publish_frequency: 10.0
-      # 与 dong_path /planned_path 的 map 系一致，避免路径变换失败导致 cmd_vel=0
-      global_frame: map
-      robot_base_frame: base_link
+      update_frequency: 15.0
+      publish_frequency: 15.0
+      # MPPI 控制：odom 滚动 + map 路径变换；与 RViz 独立 costmap（base_link）分离
+      global_frame: odom
+      robot_base_frame: base_footprint
       rolling_window: true
-      # 局部感兴趣区：以机器人为中心 3m×3m（width/height 必须为整数，单位米）
-      width: 3
-      height: 3
+      width: 5
+      height: 5
       resolution: 0.05
-      # Go2 机身约 0.6x0.32m（base_link 中心），与 MPPI CostCritic consider_footprint 一致
-      footprint: "[[-0.30, -0.16], [-0.30, 0.16], [0.30, 0.16], [0.30, -0.16]]"
-      transform_tolerance: 0.3
+      footprint: "[[-0.18, -0.15], [-0.18, 0.15], [0.18, 0.15], [0.18, -0.15]]"
+      transform_tolerance: 0.5
       plugins: ["obstacle_layer", "inflation_layer"]
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: true
-        max_obstacle_height: 0.85
+        footprint_clearing_enabled: true
+        max_obstacle_height: 0.72
         combination_method: 1
         observation_sources: livox_cloud
         livox_cloud:
           topic: /cloud_registered
           sensor_frame: odom
           data_type: "PointCloud2"
-          min_obstacle_height: 0.17
-          max_obstacle_height: 0.80
-          obstacle_max_range: 2.0
-          obstacle_min_range: 0.05
-          raytrace_max_range: 2.2
-          raytrace_min_range: 0.05
+          # odom 滚动窗口可安全使用 persistence；RViz 独立 costmap（base_link）须为 0.0
+          observation_persistence: 1.0
+          min_obstacle_height: 0.15
+          max_obstacle_height: 0.72
+          obstacle_max_range: 3.0
+          obstacle_min_range: 0.18
+          raytrace_max_range: 3.2
+          raytrace_min_range: 0.18
           clearing: true
           marking: true
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 4.0
-        inflation_radius: 0.35
+        cost_scaling_factor: 2.5
+        inflation_radius: 0.18
       always_send_full_costmap: true

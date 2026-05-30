@@ -1,6 +1,8 @@
 mppi_path_follower:
   ros__parameters:
-    follow_path_action: /follow_path
+    follow_path_action: /controller_server/follow_path
+    follow_path_action_alt: /follow_path
+    require_reloc_ok: true
     require_start_command: true
     preserve_global_path_yaw: true
     # 关闭平滑，避免把你给的朝向抹平；中间点用前视方向，终点保留 GUI 目标 yaw
@@ -14,6 +16,6 @@ mppi_path_follower:
     max_recovery_attempts: 4
     backup_speed: 0.2
     backup_duration_sec: 1.0
-    rotate_speed: 0.55
+    rotate_speed: 0.35
     rotate_duration_sec: 1.2
     recovery_pause_sec: 0.4

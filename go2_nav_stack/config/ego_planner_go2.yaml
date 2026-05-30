@@ -17,12 +17,11 @@ ego_go2_bridge:
     enable_cloud_z_crop: true
     # 四足建议用机体系高度过滤，避免 map z 漂移导致障碍被全部裁掉
     cloud_crop_in_base_frame: true
-    lidar_height_m: 0.45
-    # 离地 0.15~1.0m：base 系 z 过滤（lidar 高 0.45m => 下探 0.30m）
-    obstacle_below_lidar_m: 0.30
-    obstacle_max_height_above_base_m: 1.0
-    cloud_z_min_m: 0.15
-    cloud_z_max_m: 1.0
+    # 障碍高度带（相对 base）：较原 0.17~1.0m 整体下移 0.35m
+    obstacle_min_height_above_base_m: -0.18
+    obstacle_max_height_above_base_m: 0.65
+    cloud_z_min_m: -0.18
+    cloud_z_max_m: 0.65
     robot_body_radius_m: 0.52
     cloud_stale_warn_sec: 0.35
 

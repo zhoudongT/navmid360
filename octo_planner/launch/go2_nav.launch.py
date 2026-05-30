@@ -128,8 +128,8 @@ def generate_launch_description():
         "enable_preblocked_costmap": True,
         "preblocked_costmap_radius_cells": 3,
         "preblocked_costmap_weight": 2.5,
-        # Mid-360 顶装约 45cm：路径 z 上移与实时点云对齐（TF 仍用 tf_manager 0.15m）
-        "path_z_offset_m": 0.45,
+        # 全局路径使用 OctoMap 栅格真实 z，不再额外抬高（与机体/地面 z=0 一致）
+        "path_z_offset_m": 0.0,
     }
 
     planner_node = Node(

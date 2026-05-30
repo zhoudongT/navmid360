@@ -6,7 +6,7 @@ tf_manager_node:
     lidar_frame: livox_frame
     publish_rate: 50.0
     tf_timeout: 0.3
-    publish_base_to_imu: false
+    publish_base_to_imu: true
     publish_odom_to_base: true
     publish_map_to_odom: true
     latch_map_to_odom: true
@@ -38,5 +38,10 @@ tf_manager_node:
     refresh_map_to_odom_stamp: false
     static_base_to_imu_xyz: [0.0, 0.0, 0.0]
     static_base_to_imu_rpy: [0.0, 0.0, 0.0]
-    static_base_to_lidar_xyz: [0.0, 0.0, 0.45]
+    # base/imu/livox 三帧同点（机体/雷达）；足端在 base 下方 0.5m → base_footprint
+    static_base_to_lidar_xyz: [0.0, 0.0, 0.0]
     static_base_to_lidar_rpy: [0.0, 0.0, 0.0]
+    publish_base_footprint: true
+    footprint_frame: base_footprint
+    static_base_to_footprint_xyz: [0.0, 0.0, -0.5]
+    static_base_to_footprint_rpy: [0.0, 0.0, 0.0]

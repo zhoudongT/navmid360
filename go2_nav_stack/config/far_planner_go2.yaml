@@ -1,0 +1,112 @@
+# Go2 + Mid-360 室内：FAR Planner 参数（基于 CMU default.yaml 调优）
+# 官方: https://github.com/MichaelFYang/far_planner  分支 humble-jazzy
+
+far_planner:
+  ros__parameters:
+    main_run_freq: 5.0
+    voxel_dim: 0.12
+    # 大于机身包络，增大轮廓/可见性图与障碍的间隙（kNavClear≈robot_dim/2+voxel）
+    robot_dim: 0.68
+    vehicle_height: 0.45
+    sensor_range: 12.0
+    terrain_range: 12.0
+    local_planner_range: 2.5
+    # 视点延伸扇形线长度（与官方 default 一致）
+    visualize_ratio: 1.0
+    is_viewpoint_extend: true
+    is_multi_layer: false
+    is_opencv_visual: false
+    is_static_env: true
+    is_pub_boundary: false
+    is_debug_output: true
+    is_attempt_autoswitch: true
+    world_frame: map
+
+    graph_msger/robot_id: 0
+
+    map_handler/floor_height: 2.5
+    map_handler/cell_length: 3.0
+    map_handler/map_grid_max_length: 200.0
+    map_handler/map_grad_max_height: 20.0
+
+    util/angle_noise: 15.0
+    util/accept_max_align_angle: 5.0
+    util/obs_inflate_size: 2
+    util/new_intensity_thred: 2.0
+    util/terrain_free_Z: 0.5
+    util/dyosb_update_thred: 4
+    util/new_point_counter: 3
+    util/dynamic_obs_dacay_time: 2.0
+    util/new_points_decay_time: 1.0
+
+    graph/connect_votes_size: 8
+    graph/clear_dumper_thred: 3
+    graph/node_finalize_thred: 5
+    graph/filter_pool_size: 8
+
+    c_detector/resize_ratio: 3.0
+    c_detector/filter_count_value: 3
+    c_detector/is_save_img: false
+    c_detector/img_folder_path: ""
+
+    g_planner/converge_distance: 0.45
+    g_planner/goal_adjust_radius: 2.0
+    g_planner/free_counter_thred: 5
+    g_planner/reach_goal_vote_size: 2
+    # 沿上一周期路径多走几步再重规划，减少偏离 OctoMap 全局折线
+    g_planner/path_momentum_thred: 10
+
+far_terrain_bridge:
+  ros__parameters:
+    cloud_input_topic: /cloud_registered_map
+    map_frame: map
+    require_reloc_ok: true
+    # 足端 z=0，与 tf_manager base_footprint 一致
+    base_frame: base_footprint
+    terrain_range_m: 12.0
+    scan_range_m: 5.0
+    voxel_m: 0.12
+    # FAR 需墙根障碍点建 V-Graph；下限低于 costmap(0.12)，上限与 costmap 一致
+    obstacle_z_min_m: 0.0
+    obstacle_z_max_m: 1.05
+    ground_z_max_m: 0.12
+    obstacle_intensity: 2.0
+    free_intensity: 0.05
+    robot_body_radius_m: 0.52
+    obstacle_xy_inflate_m: 0.15
+
+far_path_follower:
+  ros__parameters:
+    planned_path_topic: /planned_path
+    far_goal_topic: /goal_point
+    map_frame: map
+    robot_frame: base_link
+    lookahead_m: 2.0
+    max_corner_yaw_deg: 70.0
+    goal_z: 0.0
+    preserve_path_z: true
+    arrival_xy_m: 0.40
+    follow_tick_hz: 5.0
+    goal_republish_sec: 0.5
+    require_start_command: true
+    align_goal_z_to_robot: true
+    graph_warmup_sec: 5.0
+    require_relocalization: true
+    waypoint_timeout_sec: 12.0
+
+far_waypoint_follower:
+  ros__parameters:
+    waypoint_topic: /way_point
+    cmd_vel_topic: /cmd_vel
+    map_frame: map
+    base_frame: base_link
+    max_vx: 0.40
+    max_wz: 0.32
+    arrival_xy_m: 0.40
+
+far_goal_bridge:
+  ros__parameters:
+    goal_in_topic: /move_base_simple/goal
+    far_goal_topic: /goal_point
+    map_frame: map
+    resume_on_start: true

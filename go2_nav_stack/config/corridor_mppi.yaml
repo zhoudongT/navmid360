@@ -1,0 +1,46 @@
+# 沿全局路径走廊：路径管理 + MPPI 局部避障
+global_path_manager:
+  ros__parameters:
+    planned_path_topic: /planned_path
+    processed_path_topic: /global_path_processed
+    local_target_topic: /local_target_pose
+    map_frame: map
+    robot_frame: base_link
+    path_spacing_m: 0.10
+    lookahead_normal_m: 1.5
+    lookahead_stair_m: 0.4
+    corridor_width_normal_m: 0.4   # 走廊总宽(m)：绿线间距，左右各约 0.2m
+    corridor_width_stair_m: 0.4
+    corridor_publish_ahead_m: 10.0
+    corridor_publish_behind_m: 2.0
+    max_lateral_error_m: 0.8
+    goal_reached_m: 0.35
+    tick_hz: 10.0
+    default_speed_limit: 0.50
+
+mppi_path_follower:
+  ros__parameters:
+    planned_path_topic: /global_path_processed
+    fallback_planned_path_topic: /planned_path
+    follow_path_action: /controller_server/follow_path
+    follow_path_action_alt: /follow_path
+    require_reloc_ok: true
+    preserve_global_path_yaw: true
+    yaw_lookahead_m: 0.7
+    downsample_min_spacing_m: 0.12
+    enable_escape_recovery: true
+    escape_min_dist_to_goal_m: 2.5
+    escape_min_follow_sec: 2.0
+    soft_abort_retry_max: 12
+    soft_abort_retry_pause_sec: 1.5
+    enable_pre_align: true
+    pre_align_threshold_deg: 45.0
+    pre_align_tolerance_deg: 12.0
+    pre_align_wz: 0.32
+    pre_align_timeout_sec: 20.0
+    rotate_speed: 0.35
+    rotate_duration_sec: 1.4
+    map_frame: map
+    base_frame: base_link
+    base_frame_alt: base_footprint
+    tf_timeout_sec: 0.35
